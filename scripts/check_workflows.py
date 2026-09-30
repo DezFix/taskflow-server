@@ -38,6 +38,14 @@ def check(path: Path) -> list[str]:
         # YAML примет его за вложенное отображение.
         if ": " in value and not (value.startswith('"') or value.startswith("'")):
             problems.append(f"{path.name}:{number}: {line}")
+
+        # Контекст secrets в условии if: GitHub отвергает такой файл
+        # целиком, и сборка падает за секунду с невнятной ошибкой.
+        # Проверять секрет нужно внутри run:, а не в условии шага.
+        if head.strip() == "if" and "secrets." in value:
+            problems.append(
+                f"{path.name}:{number}: secrets в if: — перенесите проверку в run: {line}"
+            )
     return problems
 
 

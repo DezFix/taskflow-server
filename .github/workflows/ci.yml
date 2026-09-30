@@ -42,6 +42,9 @@ jobs:
       - name: Проверка стиля
         run: ruff check app tests scripts
 
+      - name: Проверка workflow
+        run: python scripts/check_workflows.py
+
       - name: Тесты
         run: pytest -q --cov=app --cov-report=term-missing --cov-report=xml
 
