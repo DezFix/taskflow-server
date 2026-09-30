@@ -30,9 +30,13 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - name: Установить системные зависимости
+        # Зеркала Ubuntu периодически подвисают, и apt-get update висит
+        # до получаса. Повторы и лимит времени не дают прогону висеть.
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg libsndfile1
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ffmpeg libsndfile1
 
       - name: Установить зависимости
         run: |
@@ -121,8 +125,9 @@ jobs:
           cache: pip
 
       - run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg libsndfile1
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ffmpeg libsndfile1
           pip install -e .
 
       - name: "Голос tiny: очередь признания и её работа"
