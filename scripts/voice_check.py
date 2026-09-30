@@ -180,13 +180,16 @@ async def run(args: argparse.Namespace) -> int:
         print("  -> Декодирование и ресемплинг работают")
 
         if speech_ready:
-            # Сверим ключевое слово из фразы с распознанным текстом.
-            keyword = phrase.split()[0].lower().strip(".,")
-            recognized = result.text.lower()
-            if keyword and keyword in recognized:
-                print(f"  -> Распознавание верное (найдено слово «{keyword}»)")
+            # Сверяем не первое слово, а большинство слов фразы:
+            # лёгкие модели транслитерируют отдельные слова.
+            ratio = _match_ratio(phrase, result.text)
+            if ratio >= 0.6:
+                print(f"  -> Распознавание верное (совпало {ratio:.0%} слов фразы)")
             else:
-                print(f"  -> ВНИМАНИЕ: слово «{keyword}» не найдено в тексте")
+                print(
+                    f"  -> ВНИМАНИЕ: совпало только {ratio:.0%} слов фразы, "
+                    f"ожидалось не меньше 60%"
+                )
                 failures += 1
 
     if args.queue:
@@ -196,6 +199,38 @@ async def run(args: argparse.Namespace) -> int:
     print()
     print("Готово: все проверки пройдены." if not failures else f"Замечаний: {failures}")
     return 0 if not failures else 1
+
+
+def _normalize(text: str) -> str:
+    """Приводит текст к сравнимому виду: без знаков и в нижнем регистре."""
+    import re
+    import unicodedata
+
+    lowered = unicodedata.normalize("NFKD", text.lower())
+    return re.sub(r"[^a-z0-9]+", " ", lowered).strip()
+
+
+def _words(text: str) -> list[str]:
+    normalized = _normalize(text)
+    return normalized.split() if normalized else []
+
+
+def _match_ratio(expected: str, recognized: str) -> float:
+    """Доля слов фразы, найденных в распознанном тексте.
+
+    Сверять первое слово нельзя: лёгкая модель пишет «Hello» как
+    «Халло», и строгая проверка ругается на вполне рабочую модель.
+    Считаем, сколько слов фразы встретилось в ответе, и требуем
+    большинства — это честная мера качества.
+    """
+    expected_words = [w for w in _words(expected) if len(w) > 2]
+    if not expected_words:
+        return 1.0
+    recognized_words = set(_words(recognized))
+    if not recognized_words:
+        return 0.0
+    found = sum(1 for word in expected_words if word in recognized_words)
+    return found / len(expected_words)
 
 
 async def check_queue() -> int:

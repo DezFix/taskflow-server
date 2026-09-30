@@ -65,6 +65,10 @@ include = ["app*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# Тесты импортируют общие помощники как `from tests.conftest import ...`.
+# Без явного пути корень проекта не попадает в sys.path, и на CI
+# получается ModuleNotFoundError: No module named 'tests'.
+pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
 filterwarnings = ["ignore::DeprecationWarning"]

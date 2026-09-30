@@ -261,6 +261,10 @@ async def change_password(
     user.password_changed_at = utcnow()
     user.must_change_password = False
     await session.flush()
+    # Коммит здесь, а не в зависимости get_session: та досылает ответ
+    # раньше, чем завершится её yield. Иначе сотрудник успевает войти
+    # со старым паролем в окне между сбросом и фиксацией в базе.
+    await session.commit()
 
 
 async def set_password(
@@ -273,6 +277,10 @@ async def set_password(
     user.failed_login_count = 0
     user.locked_until = None
     await session.flush()
+    # Старый пароль должен перестать работать сразу же после ответа.
+    # Коммит в зависимости get_session случается позже, поэтому фиксируем
+    # здесь: иначе старые пароли живут ещё несколько миллисекунд.
+    await session.commit()
 
 
 def ensure_username_available(session: AsyncSession, username: str, exclude_id: str | None = None) -> None:
