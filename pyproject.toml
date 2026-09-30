@@ -15,7 +15,9 @@ dependencies = [
     # EmailStr в pydantic берёт проверку адреса из этой пакета:
     # без неё импорт схем падает при чистой установке.
     "email-validator>=2.2",
-    "sqlalchemy>=2.0.36",
+    # Именно [asyncio], а не просто sqlalchemy: модуль асинхронного
+    # ORM требует greenlet, и без него падает импорт при старте.
+    "sqlalchemy[asyncio]>=2.0.36",
     "alembic>=1.14",
     "python-multipart>=0.0.17",
     "PyJWT>=2.10",
@@ -44,6 +46,8 @@ dev = [
     "pytest-cov>=6.0",
     "anyio>=4.6",
     "ruff>=0.8",
+    # Нужен скриптам проверки: разбор workflow-файлов и Dockerfile.
+    "pyyaml>=6.0",
     # Клиент для интеграционных тестов WebSocket: подключается к
     # поднятому uvicorn и проверяет протокол целиком.
     "websockets>=13.0",

@@ -29,6 +29,7 @@ SPECIAL = {
     "fastapi": ["starlette"],
     # Объявлен как необязательное дополнение previews.
     "pillow": ["PIL"],
+    "pyyaml": ["yaml"],
 }
 
 

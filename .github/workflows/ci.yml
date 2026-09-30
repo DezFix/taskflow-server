@@ -45,6 +45,9 @@ jobs:
       - name: Проверка workflow
         run: python scripts/check_workflows.py
 
+      - name: Проверка Dockerfile
+        run: python scripts/check_dockerfile.py
+
       - name: Тесты
         run: pytest -q --cov=app --cov-report=term-missing --cov-report=xml
 
