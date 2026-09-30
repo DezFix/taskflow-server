@@ -41,11 +41,40 @@ PHRASES = [
 DEFAULT_LANGUAGE = "en"
 
 
+def _synthesize_with_ffmpeg(text: str, path: Path) -> bool:
+    """Синтез речи через фильтр flite в ffmpeg — для Linux в CI.
+
+    На Windows есть SAPI, на Linux его нет, а проверять очередь
+    распознавания нужно и там. Возвращает False, если ffmpeg собран без
+    libflite: тогда вызывающий код откатится на контрольный сигнал.
+    """
+    import shutil
+    import subprocess
+
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        return False
+
+    result = subprocess.run(
+        [
+            ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi",
+            "-i", f"flite=text='{text}':voice=slt",
+            "-ar", "16000",
+            "-ac", "1",
+            str(path),
+        ],
+        check=False,
+        capture_output=True,
+    )
+    return result.returncode == 0 and path.exists() and path.stat().st_size > 2000
+
+
 def synthesize(text: str, path: Path) -> Path:
-    """Синтезирует речь средствами Windows и сохраняет в WAV.
+    """Синтезирует речь и сохраняет в WAV.
 
     ffmpeg не требуется: PyAV на сервере сам приводит звук к 16 кГц моно.
-    Если SAPI недоступен, создаётся контрольный сигнал — проверяется
+    Если синтезатор недоступен, создаётся контрольный сигнал — проверяется
     путь декодирования, а не качество распознавания.
     """
     if sys.platform == "win32":
@@ -75,6 +104,8 @@ def synthesize(text: str, path: Path) -> Path:
         )
         if path.exists() and path.stat().st_size > 2000:
             return path
+    elif _synthesize_with_ffmpeg(text, path):
+        return path
 
     _write_tone(path, seconds=3.0)
     return path
