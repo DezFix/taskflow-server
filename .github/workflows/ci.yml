@@ -119,7 +119,7 @@ jobs:
           sudo apt-get install -y ffmpeg libsndfile1
           pip install -e .
 
-      - name: Модель tiny: декодирование и очередь
+      - name: "Голос tiny: очередь признания и её работа"
         env:
           HF_HUB_DISABLE_SYMLINKS_WARNING: "1"
         run: python scripts/voice_check.py --model tiny --queue
