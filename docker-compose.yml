@@ -1,0 +1,89 @@
+# TaskFlow Server — развёртывание в офисе.
+#
+#   docker compose up -d
+#   открыть http://<адрес-машины>:8080
+#
+# Данные (база, файлы, модели распознавания, бэкапы, веб-клиент) лежат
+# в ./data и переживают пересоздание контейнера.
+
+services:
+  taskflow:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: taskflow-server:1.0.0
+    container_name: taskflow-server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # --- Сервер ---
+      TASKFLOW_HOST: "0.0.0.0"
+      TASKFLOW_PORT: "8080"
+      TASKFLOW_DEBUG: "false"
+      TASKFLOW_ROOT_LEVEL: "INFO"
+
+      # --- База данных ---
+      # SQLite — вариант по умолчанию, файл создаётся автоматически.
+      # Для PostgreSQL замените на:
+      #   DATABASE_URL: postgresql+asyncpg://taskflow:пароль@postgres:5432/taskflow
+      #   и раскомментируйте сервис postgres ниже.
+      DATABASE_URL: "sqlite+aiosqlite:///./data/taskflow.db"
+      DB_ECHO: "false"
+
+      # --- Безопасность ---
+      # Оставьте пустым: сервер сгенерирует ключ в data/secret.key.
+      # Для продакшена задайте своё длинное значение.
+      JWT_SECRET: "${TASKFLOW_JWT_SECRET:-}"
+      ACCESS_TOKEN_MINUTES: "30"
+      REFRESH_TOKEN_DAYS: "30"
+
+      # --- Загрузка файлов ---
+      MAX_UPLOAD_MB: "25"
+
+      # --- Распознавание голоса ---
+      # tiny/base — быстро, small — точнее, medium — максимум точности.
+      # Модель скачивается при первом запуске (нужен интернет один раз).
+      VOICE_ENABLED: "true"
+      VOICE_MODEL: "base"
+      VOICE_LANGUAGE: "ru"
+      VOICE_COMPUTE_TYPE: "int8"
+
+      # --- Веб-клиент ---
+      # Скопируйте сюда содержимое `flutter build web` из проекта taskflow.
+      WEB_ROOT: "./data/web"
+
+      # --- CORS ---
+      # Пусто = пропускаются только зеркала текущего адреса (достаточно
+      # для веб-клиента с того же сервера). Через запятую можно добавить
+      # внешние источники, например http://localhost:3000.
+      CORS_ORIGINS: "${TASKFLOW_CORS_ORIGINS:-}"
+    volumes:
+      - ./data:/app/data
+    # Whisper нагружает процессор; лимит в 4 ядра достаточно для отдела
+    # до 10 человек и не мешает другим службам машины.
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 4G
+    # restart: unless-stopped уже задан выше, у сервиса. Ключ
+    # restart_policy из deploy не поддерживается compose и молча
+    # ломал бы разбор файла.
+
+  # --- Вариант с PostgreSQL: раскомментируйте и укажите DATABASE_URL выше ---
+  # postgres:
+  #   image: postgres:17-alpine
+  #   container_name: taskflow-postgres
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_USER: taskflow
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-замените-пароль}
+  #     POSTGRES_DB: taskflow
+  #   volumes:
+  #     - ./postgres-data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U taskflow"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5

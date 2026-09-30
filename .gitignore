@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Тесты и покрытие
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Данные установки: база, файлы, модели распознавания, бэкапы
+data/
+!data/.gitkeep
+
+# Служебное
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

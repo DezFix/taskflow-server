@@ -1,0 +1,24 @@
+# Единые окончания строк в репозитории и в рабочей копии.
+# Без этого файл, сохранённый в Windows, на сервере CI получает CRLF
+# и лишние изменения при каждом checkout.
+* text=auto eol=lf
+
+# Windows-скрипты и батники должны оставаться в CRLF.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Двоичные файлы не трогаем.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.jks binary
+*.keystore binary
+*.apk binary
+*.zip binary

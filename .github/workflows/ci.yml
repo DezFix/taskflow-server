@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Тесты (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Установить Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Установить системные зависимости
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libsndfile1
+
+      - name: Установить зависимости
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Проверка стиля
+        run: ruff check app tests scripts
+
+      - name: Тесты
+        run: pytest -q --cov=app --cov-report=term-missing --cov-report=xml
+
+      - name: Отчёт о покрытии
+        if: matrix.python-version == '3.13'
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false
+
+  migrations:
+    name: Миграции Alembic
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - run: pip install -e .
+
+      - name: Схема создаётся из моделей без расхождений с миграциями
+        run: |
+          alembic upgrade head
+          alembic check
+
+  smoke:
+    name: Сквозная проверка API
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - run: pip install -e .
+
+      - name: Полный сценарий сотрудника
+        run: python scripts/smoke.py
+
+  docker:
+    name: Образ Docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Сборка образа
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: taskflow-server:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  voice:
+    name: Распознавание голоса
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libsndfile1
+          pip install -e .
+
+      - name: Модель tiny: декодирование и очередь
+        env:
+          HF_HUB_DISABLE_SYMLINKS_WARNING: "1"
+        run: python scripts/voice_check.py --model tiny --queue

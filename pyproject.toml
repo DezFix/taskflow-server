@@ -1,0 +1,93 @@
+[project]
+name = "taskflow-server"
+version = "1.0.0"
+description = "Серверная часть TaskFlow: задачи, сотрудники, чат с распознаванием голоса, веб-интерфейс"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "DezFix" }]
+
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    # EmailStr в pydantic берёт проверку адреса из этой пакета:
+    # без неё импорт схем падает при чистой установке.
+    "email-validator>=2.2",
+    "sqlalchemy>=2.0.36",
+    "alembic>=1.14",
+    "python-multipart>=0.0.17",
+    "PyJWT>=2.10",
+    "argon2-cffi>=23.1",
+    "httpx>=0.28",
+    "aiosqlite>=0.20",
+    "orjson>=3.10",
+    "structlog>=24.4",
+    "python-slugify>=8.0",
+    "numpy>=1.26",
+    # PyAV закреплён ниже 16: faster-whisper вызывает av.open с параметром
+    # metadata_errors, который удалён начиная с PyAV 16.
+    "av>=11,<16",
+    "faster-whisper>=1.1.0",
+]
+
+[project.optional-dependencies]
+postgres = ["asyncpg>=0.30"]
+mysql = ["aiomysql>=0.2"]
+# Уменьшенные копии фотографий. Без Pillow сервер всё равно работает:
+# превью просто не создаются, а оригиналы показываются как есть.
+previews = ["pillow>=11.0"]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "anyio>=4.6",
+    "ruff>=0.8",
+    # Клиент для интеграционных тестов WebSocket: подключается к
+    # поднятому uvicorn и проверяет протокол целиком.
+    "websockets>=13.0",
+]
+
+[project.scripts]
+taskflow-server = "app.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4", "SIM"]
+ignore = [
+    "B008",
+    "E501",
+    # Наследование перечислений от str нужно для совместимости с
+    # SQLAlchemy и FastAPI: смена на StrEnum меняет str() члена
+    # и может тихо поменять формат значений в ответах.
+    "UP042",
+    # Оформление дженериков в старом стиле читается одинаково, а
+    # PEP 695 ломает поддержку более старых версий Python.
+    "UP046",
+    # Вложенные условия в разборе форматов файлов повторяют структуру
+    # самого формата и читаются понятнее, чем объединённые.
+    "SIM102",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Тесты задают окружение до импорта приложения.
+"tests/conftest.py" = ["E402"]
+# Служебный скрипт диагностики, а не часть приложения.
+"scripts/diag_voice.py" = ["C408"]
