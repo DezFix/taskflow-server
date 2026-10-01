@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.deps import SessionDep, require_perm
 from app.errors import bad_request, conflict, forbidden, not_found
-from app.models import Position, Role, User
+from app.models import Role, User
 from app.realtime import EVENT_USER_UPDATED, hub
 from app.schemas import (
     ResetPasswordOut,
@@ -29,9 +29,7 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 async def _load_user(session: SessionDep, user_id: str) -> User:
     user = await session.scalar(
-        select(User)
-        .where(User.id == user_id)
-        .options(selectinload(User.roles), selectinload(User.position))
+        select(User).where(User.id == user_id).options(selectinload(User.roles))
     )
     if user is None:
         raise not_found("user_not_found", "Сотрудник не найден") from None
@@ -51,22 +49,19 @@ async def _resolve_roles(session: SessionDep, role_ids: list[str]) -> list[Role]
     "",
     response_model=list[UserOut],
     summary="Список сотрудников",
-    description="Поиск по имени, логину и должности. Фильтры — по активности и роли.",
+    description="Поиск по имени и логину. Фильтры — по активности и роли.",
 )
 async def list_users(
     session: SessionDep,
     search: str | None = Query(default=None, max_length=100),
     is_active: bool | None = None,
-    position_id: str | None = None,
     role_id: str | None = None,
     _: User = Depends(require_perm("users.view")),
 ) -> list[UserOut]:
-    stmt = select(User).options(selectinload(User.roles), selectinload(User.position))
+    stmt = select(User).options(selectinload(User.roles))
 
     if is_active is not None:
         stmt = stmt.where(User.is_active.is_(is_active))
-    if position_id:
-        stmt = stmt.where(User.position_id == position_id)
     if role_id:
         stmt = stmt.where(User.roles.any(Role.id == role_id))
     if search:
@@ -75,7 +70,6 @@ async def list_users(
             or_(
                 func.lower(User.full_name).like(pattern),
                 func.lower(User.username).like(pattern),
-                func.lower(func.coalesce(User.job_title, "")).like(pattern),
             )
         )
 
@@ -106,10 +100,6 @@ async def create_user(
         existing = await session.scalar(select(User).where(User.email == payload.email))
         if existing:
             raise conflict("email_taken", "Этот email уже используется") from None
-    if payload.position_id:
-        position = await session.get(Position, payload.position_id)
-        if position is None:
-            raise bad_request("position_invalid", "Должность не найдена")
 
     roles = await _resolve_roles(session, payload.role_ids)
     if not roles:
@@ -124,8 +114,6 @@ async def create_user(
         full_name=payload.full_name.strip(),
         email=payload.email,
         phone=(payload.phone or "").strip() or None,
-        job_title=(payload.job_title or "").strip() or None,
-        position_id=payload.position_id,
         password_hash=auth_service.hash_password(temporary),
         is_active=True,
         must_change_password=payload.must_change_password,
@@ -181,7 +169,9 @@ async def update_user(
 
     if "is_active" in data and data["is_active"] is False:
         if user.id == actor.id:
-            raise forbidden("self_deactivate", "Нельзя деактивировать свою учётную запись") from None
+            raise forbidden(
+                "self_deactivate", "Нельзя деактивировать свою учётную запись"
+            ) from None
         if user.is_superuser:
             # Последнего администратора оставлять нельзя — иначе сервер
             # останется без управления.
@@ -198,12 +188,6 @@ async def update_user(
                     "Это единственный активный администратор. Назначьте другого.",
                 )
 
-    new_position = None
-    if "position_id" in data and data["position_id"]:
-        new_position = await session.get(Position, data["position_id"])
-        if new_position is None:
-            raise bad_request("position_invalid", "Должность не найдена")
-
     new_roles = None
     if "role_ids" in data and data["role_ids"] is not None:
         new_roles = await _resolve_roles(session, data["role_ids"])
@@ -212,19 +196,11 @@ async def update_user(
 
     changed: list[str] = []
     for field, value in data.items():
-        if field in ("role_ids", "position_id"):
+        if field == "role_ids":
             continue
         if getattr(user, field) != value:
             setattr(user, field, value)
             changed.append(field)
-
-    if "position_id" in data:
-        if user.position_id != data["position_id"]:
-            changed.append("position_id")
-        user.position_id = data["position_id"]
-        # Объект должности нужен сериализатору сразу: в async ленивой
-        # загрузки нет, и обращение вызвало бы дополнительный запрос.
-        user.position = new_position
 
     if new_roles is not None:
         if {r.id for r in user.roles} != {r.id for r in new_roles}:
@@ -246,9 +222,7 @@ async def update_user(
     # Клиент сотрудника сразу получает обновление профиля и прав.
     if changed:
         refreshed = await _load_user(session, user.id)
-        await hub.send_to_user(
-            user.id, EVENT_USER_UPDATED, user_out(refreshed).model_dump()
-        )
+        await hub.send_to_user(user.id, EVENT_USER_UPDATED, user_out(refreshed).model_dump())
 
     return user_out(user)
 
@@ -368,20 +342,10 @@ async def stats_overview(
     session: SessionDep,
     _: User = Depends(require_perm("users.view")),
 ) -> dict:
-    active = await session.scalar(
-        select(func.count(User.id)).where(User.is_active.is_(True))
-    )
-    inactive = await session.scalar(
-        select(func.count(User.id)).where(User.is_active.is_(False))
-    )
-    unassigned = await session.scalar(
-        select(func.count(User.id)).where(
-            User.is_active.is_(True), User.position_id.is_(None)
-        )
-    )
+    active = await session.scalar(select(func.count(User.id)).where(User.is_active.is_(True)))
+    inactive = await session.scalar(select(func.count(User.id)).where(User.is_active.is_(False)))
     return {
         "active": int(active or 0),
         "inactive": int(inactive or 0),
-        "without_position": int(unassigned or 0),
         "total": int(active or 0) + int(inactive or 0),
     }

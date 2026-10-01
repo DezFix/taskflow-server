@@ -13,7 +13,7 @@ from app.models.task import (
     TaskTag,
     task_tag_links,
 )
-from app.models.user import Position, RefreshSession, Role, User, user_roles
+from app.models.user import RefreshSession, Role, User, user_roles
 from app.models.voice import Transcript, TranscriptStatus
 
 __all__ = [
@@ -21,7 +21,6 @@ __all__ = [
     "User",
     "Role",
     "user_roles",
-    "Position",
     "RefreshSession",
     "Task",
     "TaskComment",

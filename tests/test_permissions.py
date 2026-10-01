@@ -73,7 +73,6 @@ async def test_custom_role_grants_and_removes_access(client: AsyncClient, users)
                 "tasks.create",
                 "tasks.edit_assigned",
                 "chat.direct",
-                "positions.view",
                 "roles.view",
             ],
         },
@@ -105,9 +104,9 @@ async def test_custom_role_grants_and_removes_access(client: AsyncClient, users)
     # Право есть — доступ есть.
     assert (await client.get("/api/v1/tasks", headers=headers)).status_code == 200
     # Права нет — 403 с перечнем недостающих.
-    denied = await client.post("/api/v1/positions", json={"title": "Новая"}, headers=headers)
+    denied = await client.post("/api/v1/roles", json={"title": "Новая"}, headers=headers)
     assert denied.status_code == 403
-    assert "positions.create" in denied.json()["error"]["details"]["missing"]
+    assert "roles.create" in denied.json()["error"]["details"]["missing"]
 
 
 async def test_user_cannot_delete_own_account(client: AsyncClient, users) -> None:
@@ -131,9 +130,7 @@ async def test_system_role_cannot_be_deleted(client: AsyncClient, users) -> None
     roles = await client.get("/api/v1/roles", headers=auth(users, "admin"))
     system = next(r for r in roles.json() if r["is_system"])
 
-    response = await client.delete(
-        f"/api/v1/roles/{system['id']}", headers=auth(users, "admin")
-    )
+    response = await client.delete(f"/api/v1/roles/{system['id']}", headers=auth(users, "admin"))
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "system_role"
 
@@ -177,9 +174,7 @@ async def test_superuser_sees_all_permissions(client: AsyncClient, users) -> Non
     assert set(me.json()["permissions"]) == set(PERMISSION_KEYS)
 
 
-async def test_system_roles_expose_language_neutral_id(
-    client: AsyncClient, users
-) -> None:
+async def test_system_roles_expose_language_neutral_id(client: AsyncClient, users) -> None:
     """У системных ролей есть английский идентификатор для перевода.
 
     Ключ роли в базе русский, и менять его нельзя: он участвует в

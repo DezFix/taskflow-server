@@ -5,7 +5,6 @@ from __future__ import annotations
 from app.models import (
     Attachment,
     Message,
-    Position,
     Role,
     Task,
     TaskComment,
@@ -14,7 +13,7 @@ from app.models import (
     TaskStatus,
     User,
 )
-from app.schemas.auth import PositionBrief, RoleBrief, UserBrief, UserMe
+from app.schemas.auth import RoleBrief, UserBrief, UserMe
 from app.schemas.chat import AttachmentBrief, MessageOut, TranscriptOut
 from app.schemas.task import (
     CommentOut,
@@ -34,18 +33,11 @@ def avatar_url(user: User | None) -> str | None:
 def user_brief(user: User | None) -> UserBrief | None:
     if user is None:
         return None
-    position = (
-        PositionBrief(id=user.position.id, title=user.position.title)
-        if user.position
-        else None
-    )
     return UserBrief(
         id=user.id,
         username=user.username,
         full_name=user.full_name,
-        job_title=user.job_title,
         avatar_url=avatar_url(user),
-        position=position,
         is_active=user.is_active,
     )
 
@@ -158,20 +150,6 @@ def task_detail_out(task: Task, attachments_by_id: dict[str, AttachmentBrief]) -
     )
 
 
-def position_out(position: Position, users_count: int = 0) -> PositionOut:  # noqa: F821
-    from app.schemas.user import PositionOut
-
-    return PositionOut(
-        id=position.id,
-        title=position.title,
-        description=position.description,
-        sort_order=position.sort_order,
-        is_active=position.is_active,
-        users_count=users_count,
-        created_at=position.created_at,
-    )
-
-
 def role_out(role: Role, users_count: int = 0) -> RoleOut:  # noqa: F821
     from app.permissions import system_role_id
     from app.schemas.user import RoleOut
@@ -192,18 +170,11 @@ def role_out(role: Role, users_count: int = 0) -> RoleOut:  # noqa: F821
 def user_out(user: User) -> UserOut:  # noqa: F821
     from app.schemas.user import UserOut
 
-    position = (
-        PositionBrief(id=user.position.id, title=user.position.title)
-        if user.position
-        else None
-    )
     return UserOut(
         id=user.id,
         username=user.username,
         full_name=user.full_name,
-        job_title=user.job_title,
         avatar_url=avatar_url(user),
-        position=position,
         is_active=user.is_active,
         email=user.email,
         phone=user.phone,
@@ -217,20 +188,13 @@ def user_out(user: User) -> UserOut:  # noqa: F821
 
 
 def user_me(user: User) -> UserMe:
-    position = (
-        PositionBrief(id=user.position.id, title=user.position.title)
-        if user.position
-        else None
-    )
     return UserMe(
         id=user.id,
         username=user.username,
         full_name=user.full_name,
         email=user.email,
         phone=user.phone,
-        job_title=user.job_title,
         avatar_url=avatar_url(user),
-        position=position,
         roles=[role_brief(r) for r in user.roles],
         permissions=sorted(user.permissions),
         is_active=user.is_active,

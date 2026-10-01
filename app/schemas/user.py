@@ -9,37 +9,6 @@ from pydantic import EmailStr, Field, field_validator
 from app.schemas.auth import RoleBrief, UserBrief
 from app.schemas.common import Schema, to_utc
 
-# --- Должности ---
-
-
-class PositionCreate(Schema):
-    title: str = Field(min_length=2, max_length=160)
-    description: str | None = Field(default=None, max_length=1000)
-    sort_order: int = 0
-
-
-class PositionUpdate(Schema):
-    title: str | None = Field(default=None, min_length=2, max_length=160)
-    description: str | None = Field(default=None, max_length=1000)
-    sort_order: int | None = None
-    is_active: bool | None = None
-
-
-class PositionOut(Schema):
-    id: str
-    title: str
-    description: str | None = None
-    sort_order: int = 0
-    is_active: bool = True
-    users_count: int = 0
-    created_at: datetime | None = None
-
-    @field_validator("created_at", mode="after")
-    @classmethod
-    def _ser(cls, value: datetime | None) -> datetime | None:
-        return to_utc(value)
-
-
 # --- Роли ---
 
 
@@ -123,8 +92,6 @@ class UserCreate(Schema):
     full_name: str = Field(min_length=2, max_length=200)
     email: EmailStr | None = None
     phone: str | None = Field(default=None, max_length=40)
-    job_title: str | None = Field(default=None, max_length=160)
-    position_id: str | None = None
     role_ids: list[str] = Field(default_factory=list)
     password: str | None = Field(default=None, min_length=8, max_length=128)
     must_change_password: bool = True
@@ -141,8 +108,6 @@ class UserUpdate(Schema):
     full_name: str | None = Field(default=None, min_length=2, max_length=200)
     email: EmailStr | None = None
     phone: str | None = Field(default=None, max_length=40)
-    job_title: str | None = Field(default=None, max_length=160)
-    position_id: str | None = None
     role_ids: list[str] | None = None
     is_active: bool | None = None
 
@@ -183,5 +148,4 @@ class ResetPasswordOut(Schema):
 class UserFilter(Schema):
     search: str | None = None
     is_active: bool | None = None
-    position_id: str | None = None
     role_id: str | None = None

@@ -1,4 +1,4 @@
-"""Тесты сотрудников, должностей и ролей."""
+"""Тесты сотрудников и ролей."""
 
 from __future__ import annotations
 
@@ -12,108 +12,43 @@ def auth(users, role: str) -> dict[str, str]:  # noqa: ANN001
     return {"Authorization": f"Bearer {users.tokens[role]}"}
 
 
-async def test_positions_seeded_on_startup(client: AsyncClient, users) -> None:
+async def test_positions_endpoint_is_gone(client: AsyncClient, users) -> None:
+    """Должности удалены: их задачу выполняют роли."""
     response = await client.get("/api/v1/positions", headers=auth(users, "staff"))
+    assert response.status_code == 404
+
+
+async def test_user_has_no_position_fields(client: AsyncClient, users) -> None:
+    response = await client.get("/api/v1/users", headers=auth(users, "head"))
     assert response.status_code == 200
-    titles = {item["title"] for item in response.json()}
-    assert "Системный инженер" in titles
-    assert "Разработчик" in titles
+    first = response.json()[0]
+    assert "position" not in first
+    assert "job_title" not in first
+    # Роль остаётся единственным источником прав.
+    assert first["roles"]
 
 
-async def test_create_position(client: AsyncClient, users) -> None:
+async def test_stale_position_fields_do_not_break_creation(client: AsyncClient, users) -> None:
+    """Старый клиент шлёт position_id: он должен работать, просто игнорируясь.
+
+    Строгий запрет лишних полей сломал бы установленные версии клиента.
+    """
+    roles = await client.get("/api/v1/roles", headers=auth(users, "head"))
+    staff_role = next(r for r in roles.json() if r["key"] == "Сотрудник")
+
     response = await client.post(
-        "/api/v1/positions",
-        json={"title": "DevOps", "description": "Серверы и деплой", "sort_order": 5},
+        "/api/v1/users",
+        json={
+            "username": "leftover",
+            "full_name": "Остаток Должности",
+            "role_ids": [staff_role["id"]],
+            "position_id": "любой",
+            "job_title": "Разработчик",
+        },
         headers=auth(users, "head"),
     )
     assert response.status_code == 201
-    assert response.json()["title"] == "DevOps"
-    assert response.json()["users_count"] == 0
-
-
-async def test_duplicate_position_rejected(client: AsyncClient, users) -> None:
-    first = await client.post(
-        "/api/v1/positions", json={"title": "DevOps"}, headers=auth(users, "head")
-    )
-    assert first.status_code == 201
-
-    second = await client.post(
-        "/api/v1/positions", json={"title": "DevOps"}, headers=auth(users, "head")
-    )
-    assert second.status_code == 409
-    assert second.json()["error"]["code"] == "position_exists"
-
-
-async def test_staff_cannot_create_position(client: AsyncClient, users) -> None:
-    response = await client.post(
-        "/api/v1/positions", json={"title": "Своя"}, headers=auth(users, "staff")
-    )
-    assert response.status_code == 403
-
-
-async def test_position_in_use_cannot_be_deleted(client: AsyncClient, users) -> None:
-    position = await client.post(
-        "/api/v1/positions", json={"title": "Архитектор"}, headers=auth(users, "head")
-    )
-    role = await client.get("/api/v1/roles", headers=auth(users, "head"))
-    staff_role = next(r for r in role.json() if r["key"] == "Сотрудник")
-
-    await client.patch(
-        f"/api/v1/users/{users.ids['staff']}",
-        json={"position_id": position.json()["id"]},
-        headers=auth(users, "head"),
-    )
-
-    response = await client.delete(
-        f"/api/v1/positions/{position.json()['id']}", headers=auth(users, "head")
-    )
-    assert response.status_code == 409
-    assert response.json()["error"]["code"] == "position_in_use"
-    assert staff_role
-
-
-async def test_empty_position_can_be_deleted(client: AsyncClient, users) -> None:
-    position = await client.post(
-        "/api/v1/positions", json={"title": "Временная"}, headers=auth(users, "head")
-    )
-    response = await client.delete(
-        f"/api/v1/positions/{position.json()['id']}", headers=auth(users, "head")
-    )
-    assert response.status_code == 200
-
-
-async def test_assign_position_to_user(client: AsyncClient, users) -> None:
-    position = await client.post(
-        "/api/v1/positions", json={"title": "Аналитик"}, headers=auth(users, "head")
-    )
-    response = await client.patch(
-        f"/api/v1/users/{users.ids['staff']}",
-        json={"position_id": position.json()["id"]},
-        headers=auth(users, "head"),
-    )
-    assert response.status_code == 200
-    assert response.json()["position"]["title"] == "Аналитик"
-
-
-async def test_position_can_be_cleared(client: AsyncClient, users) -> None:
-    """Должность можно снять: клиент шлёт position_id = null."""
-    position = await client.post(
-        "/api/v1/positions", json={"title": "Временная"}, headers=auth(users, "head")
-    )
-    assigned = await client.patch(
-        f"/api/v1/users/{users.ids['staff']}",
-        json={"position_id": position.json()["id"]},
-        headers=auth(users, "head"),
-    )
-    assert assigned.json()["position"] is not None
-
-    cleared = await client.patch(
-        f"/api/v1/users/{users.ids['staff']}",
-        json={"position_id": None},
-        headers=auth(users, "head"),
-    )
-    assert cleared.status_code == 200
-    assert cleared.json()["position"] is None
+    assert "position" not in response.json()
 
 
 async def test_create_user_returns_temporary_password(client: AsyncClient, users) -> None:
@@ -190,9 +125,7 @@ async def test_reset_password_revokes_sessions(client: AsyncClient, users) -> No
     assert fresh.status_code == 200
 
 
-async def test_deactivated_user_disappears_from_active_list(
-    client: AsyncClient, users
-) -> None:
+async def test_deactivated_user_disappears_from_active_list(client: AsyncClient, users) -> None:
     await client.post(
         f"/api/v1/users/{users.ids['staff2']}/deactivate", headers=auth(users, "head")
     )

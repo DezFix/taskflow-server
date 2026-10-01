@@ -84,7 +84,7 @@ async def user_load(
         await session.scalars(
             select(User)
             .where(User.is_active.is_(True))
-            .options(selectinload(User.roles), selectinload(User.position))
+            .options(selectinload(User.roles))
             .order_by(User.full_name)
         )
     ).all()
@@ -123,11 +123,15 @@ async def user_load(
             )
         )
 
-        comments_count = await session.scalar(
-            select(func.count(TaskComment.id))
-            .join(Task, Task.id == TaskComment.task_id)
-            .where(Task.assignee_id == member.id, TaskComment.is_work_report.is_(True))
-        ) if can_see_all else 0
+        comments_count = (
+            await session.scalar(
+                select(func.count(TaskComment.id))
+                .join(Task, Task.id == TaskComment.task_id)
+                .where(Task.assignee_id == member.id, TaskComment.is_work_report.is_(True))
+            )
+            if can_see_all
+            else 0
+        )
 
         rows.append(
             {

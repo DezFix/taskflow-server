@@ -1,11 +1,11 @@
 """Командная строка TaskFlow Server.
 
-    python -m app.cli serve        запустить сервер
-    python -m app.cli initdb       создать схему и начальные данные
-    python -m app.cli admin        создать или сбросить пароль администратора
-    python -m app.cli backup       создать резервную копию
-    python -m app.cli warmup       скачать и загрузить модель Whisper
-    python -m app.cli check        проверить окружение и доступность зависимостей
+python -m app.cli serve        запустить сервер
+python -m app.cli initdb       создать схему и начальные данные
+python -m app.cli admin        создать или сбросить пароль администратора
+python -m app.cli backup       создать резервную копию
+python -m app.cli warmup       скачать и загрузить модель Whisper
+python -m app.cli check        проверить окружение и доступность зависимостей
 """
 
 from __future__ import annotations
@@ -17,6 +17,9 @@ import sys
 from pathlib import Path
 
 from app.config import get_settings
+from app.logging_setup import get_logger
+
+logger = get_logger("cli")
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
@@ -48,10 +51,35 @@ def cmd_initdb(_args: argparse.Namespace) -> int:
         async with get_sessionmaker()() as session:
             await seed_all(session)
             await session.commit()
-        print("Схема базы данных готова, начальные данные записаны.")
 
     asyncio.run(run())
+    # Отметку ставим вне event loop: Alembic внутри env.py вызывает
+    # asyncio.run(), а внутри уже работающего цикла это запрещено.
+    _stamp_head()
+    print("Схема базы данных готова, начальные данные записаны.")
     return 0
+
+
+def _stamp_head() -> None:
+    """Помечает базу как актуальную по состоянию моделей.
+
+    Схема создана из моделей, поэтому Alembic о ней ничего не знает.
+    Без отметки первый же `alembic upgrade` пытался бы создать таблицы
+    заново и падал с «table already exists».
+    """
+    from alembic.config import Config
+
+    from alembic import command
+
+    ini = Path(__file__).resolve().parent.parent / "alembic.ini"
+    if not ini.exists():
+        # В собранном образ alembic.ini может отсутствовать: без него
+        # инициализация всё равно успешна, недоступен лишь upgrade.
+        logger.warning("alembic_ini_missing", path=str(ini))
+        return
+    config = Config(str(ini))
+    config.set_main_option("script_location", str(ini.parent / "alembic"))
+    command.stamp(config, "head")
 
 
 def cmd_admin(args: argparse.Namespace) -> int:
@@ -67,9 +95,7 @@ def cmd_admin(args: argparse.Namespace) -> int:
             admin_role = await session.scalar(select(Role).where(Role.key == "Администратор"))
 
             if args.username:
-                user = await session.scalar(
-                    select(User).where(User.username == args.username)
-                )
+                user = await session.scalar(select(User).where(User.username == args.username))
                 if user is None:
                     print(f"Пользователь {args.username} не найден.")
                     return
@@ -146,7 +172,9 @@ def cmd_check(_args: argparse.Namespace) -> int:
     if settings.is_sqlite:
         db_path = Path(settings.path("./data")) / "taskflow.db"
         writable = db_path.parent.exists() and _writable(db_path.parent)
-        print(f"  Файл базы       : {db_path} {'(каталог доступен)' if writable else '(НЕТ ДОСТУПА)'}")
+        print(
+            f"  Файл базы       : {db_path} {'(каталог доступен)' if writable else '(НЕТ ДОСТУПА)'}"
+        )
         if not writable:
             problems.append(f"Нет прав на каталог {db_path.parent}")
 
@@ -157,8 +185,10 @@ def cmd_check(_args: argparse.Namespace) -> int:
     ):
         print(f"  {label:16} : {path} {'(есть)' if path.exists() else '(будет создан)'}")
 
-    print(f"  Распознавание   : {'включено' if settings.voice_enabled else 'выключено'}, "
-          f"модель {settings.voice_model}")
+    print(
+        f"  Распознавание   : {'включено' if settings.voice_enabled else 'выключено'}, "
+        f"модель {settings.voice_model}"
+    )
 
     for module, hint in (
         ("faster_whisper", "pip install faster-whisper"),

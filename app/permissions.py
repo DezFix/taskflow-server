@@ -28,11 +28,6 @@ ALL_PERMISSIONS: tuple[Permission, ...] = (
     _p("users.edit", "Редактирование сотрудников", "Сотрудники"),
     _p("users.delete", "Удаление сотрудников", "Сотрудники"),
     _p("users.reset_password", "Сброс пароля сотрудника", "Сотрудники"),
-    # --- Должности ---
-    _p("positions.view", "Просмотр должностей", "Должности"),
-    _p("positions.create", "Создание должностей", "Должности"),
-    _p("positions.edit", "Редактирование должностей", "Должности"),
-    _p("positions.delete", "Удаление должностей", "Должности"),
     # --- Роли ---
     _p("roles.view", "Просмотр ролей", "Роли"),
     _p("roles.create", "Создание ролей", "Роли"),
@@ -106,18 +101,13 @@ SYSTEM_ROLES: dict[str, tuple[str, bool, list[str]]] = {
     _HEAD_KEY: (
         "Управление отделом: сотрудники, задачи, отчёты. Без системных настроек",
         True,
-        sorted(
-            key
-            for key in PERMISSION_KEYS
-            if not key.startswith("settings.manage_roles")
-        ),
+        sorted(key for key in PERMISSION_KEYS if not key.startswith("settings.manage_roles")),
     ),
     _STAFF_KEY: (
         "Свои задачи, чат и профиль",
         True,
         [
             "users.view",
-            "positions.view",
             "roles.view",
             "tasks.view",
             "tasks.edit_assigned",

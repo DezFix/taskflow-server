@@ -67,7 +67,6 @@ async def setup(payload: SetupRequest, request: Request, session: SessionDep) ->
         is_superuser=True,
         is_active=True,
         must_change_password=False,
-        job_title="Системный администратор",
     )
     if admin_role is not None:
         admin.roles.append(admin_role)
@@ -250,15 +249,12 @@ async def list_sessions(
     return result
 
 
-
 @router.delete(
     "/sessions/{session_id}",
     response_model=OkMessage,
     summary="Отозвать сессию",
 )
-async def revoke_session(
-    session_id: str, user: CurrentUser, session: SessionDep
-) -> OkMessage:
+async def revoke_session(session_id: str, user: CurrentUser, session: SessionDep) -> OkMessage:
     from app.models import RefreshSession
 
     record = await session.get(RefreshSession, session_id)

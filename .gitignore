@@ -27,3 +27,4 @@ data/*
 Thumbs.db
 server.log
 server.ready
+server.err

@@ -152,18 +152,11 @@ async def scenario(client: httpx.AsyncClient, base: str) -> None:
         str(role_keys),
     )
     role_map = {r["key"]: r["id"] for r in roles.json()}
+    check("Базовые роли созданы", len(roles.json()) >= 3)
 
-    positions = await client.get("/api/v1/positions", headers=admin)
-    check("Базовые должности созданы", len(positions.json()) >= 6)
-
-    print("\n3. Должности и сотрудники")
-    position = await client.post(
-        "/api/v1/positions",
-        json={"title": "Системный инженер", "sort_order": 30},
-        headers=admin,
-    )
-    check("Должность создана", position.status_code in (201, 409), position.text)
-    position_id = position.json().get("id") or positions.json()[0]["id"]
+    print("\n3. Сотрудники")
+    gone = await client.get("/api/v1/positions", headers=admin)
+    check("Эндпоинт должностей удалён", gone.status_code == 404, gone.text)
 
     created_users: dict[str, str] = {}
     temporary: dict[str, str] = {}
@@ -178,7 +171,6 @@ async def scenario(client: httpx.AsyncClient, base: str) -> None:
                 "username": login,
                 "full_name": name,
                 "role_ids": [role_map[role_key]],
-                "position_id": position_id,
             },
             headers=admin,
         )
@@ -388,10 +380,22 @@ async def scenario(client: httpx.AsyncClient, base: str) -> None:
     check("Деактивированный не входит", blocked_login.status_code == 403)
 
     print("\n10. Реалтайм (WebSocket)")
-    await websocket_check(client, base, tokens["manager"])
+    await websocket_check(
+        client,
+        base,
+        tokens["manager"],
+        tokens["engineer2"],
+        created_users["manager"],
+    )
 
 
-async def websocket_check(client: httpx.AsyncClient, base: str, token: str) -> None:
+async def websocket_check(
+    client: httpx.AsyncClient,
+    base: str,
+    token: str,
+    other_token: str,
+    listener_id: str,
+) -> None:
     import websockets
 
     ws_url = base.replace("http://", "ws://") + "/api/v1/ws?token=" + token
@@ -406,17 +410,25 @@ async def websocket_check(client: httpx.AsyncClient, base: str, token: str) -> N
 
     async with websockets.connect(ws_url) as socket:
         await socket.recv()
-        await client.post(
-            "/api/v1/positions",
-            json={"title": "Проверка реалтайма"},
-            headers={"Authorization": f"Bearer {token}"},
+        # Событие task.created получают автор, исполнитель и все, кому
+        # задача видна, кроме того, кто её создал. Поэтому событие
+        # создаёт другой сотрудник и назначает задачу слушателю.
+        response = await client.post(
+            "/api/v1/tasks",
+            json={
+                "title": "Проверка реалтайма",
+                "description": "Задача создаётся, чтобы дождаться события",
+                "priority": "normal",
+                "assignee_id": listener_id,
+            },
+            headers={"Authorization": f"Bearer {other_token}"},
         )
+        check("Задача для проверки реалтайма создана", response.status_code == 201, response.text)
         try:
-            event = json.loads(await asyncio.wait_for(socket.recv(), timeout=3))
+            event = json.loads(await asyncio.wait_for(socket.recv(), timeout=5))
             check("Событие реалтайма приходит", "type" in event, str(event)[:120])
         except TimeoutError:
-            # Позиции не шлют события — это ожидаемо, канал при этом жив.
-            check("Канал реалтайма стабилен", True)
+            check("Событие реалтайма приходит", False, "событие не пришло за 5 секунд")
 
 
 if __name__ == "__main__":

@@ -3,7 +3,6 @@
 from app.schemas.auth import (
     ChangePasswordRequest,
     LoginRequest,
-    PositionBrief,
     RefreshRequest,
     RoleBrief,
     ServerInfo,
@@ -60,9 +59,6 @@ from app.schemas.task import (
 )
 from app.schemas.user import (
     PermissionOut,
-    PositionCreate,
-    PositionOut,
-    PositionUpdate,
     ResetPasswordOut,
     ResetPasswordRequest,
     RoleCreate,
@@ -83,7 +79,6 @@ __all__ = [
     "UserMe",
     "UserBrief",
     "RoleBrief",
-    "PositionBrief",
     "ServerInfo",
     "SessionInfo",
     "ChangePasswordRequest",
@@ -95,9 +90,6 @@ __all__ = [
     "UserFilter",
     "ResetPasswordRequest",
     "ResetPasswordOut",
-    "PositionCreate",
-    "PositionUpdate",
-    "PositionOut",
     "RoleCreate",
     "RoleUpdate",
     "RoleOut",

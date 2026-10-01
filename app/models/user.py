@@ -1,4 +1,4 @@
-"""Пользователи, роли, должности, refresh-сессии."""
+"""Пользователи, роли, refresh-сессии."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ from sqlalchemy import (
     Integer,
     String,
     Table,
-    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -36,21 +35,6 @@ user_roles = Table(
         primary_key=True,
     ),
 )
-
-
-class Position(Base, IdMixin, TimestampMixin):
-    """Должность: системный инженер, тестировщик, аналитик и т.п."""
-
-    __tablename__ = "positions"
-
-    title: Mapped[str] = mapped_column(String(160), nullable=False)
-    description: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-
-    users: Mapped[list[User]] = relationship(back_populates="position")
-
-    __table_args__ = (UniqueConstraint("title", name="uq_positions_title"),)
 
 
 class Role(Base, IdMixin, TimestampMixin):
@@ -85,11 +69,6 @@ class User(Base, IdMixin, TimestampMixin):
     phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     avatar_file_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    job_title: Mapped[str | None] = mapped_column(String(160), nullable=True)
-
-    position_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("positions.id", ondelete="SET NULL"), nullable=True
-    )
 
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_superuser: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -101,7 +80,6 @@ class User(Base, IdMixin, TimestampMixin):
     locked_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     password_changed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    position: Mapped[Position | None] = relationship(back_populates="users", lazy="joined")
     roles: Mapped[list[Role]] = relationship(
         secondary=user_roles, back_populates="users", lazy="selectin"
     )
@@ -120,8 +98,6 @@ class User(Base, IdMixin, TimestampMixin):
 
     @property
     def display_name(self) -> str:
-        if self.job_title:
-            return f"{self.full_name} ({self.job_title})"
         return self.full_name
 
     def is_locked(self) -> bool:

@@ -23,7 +23,6 @@ from app.api.v1 import (
     chat,
     files,
     meta,
-    positions,
     roles,
     tasks,
     users,
@@ -153,7 +152,6 @@ def install_middlewares() -> None:
 app.include_router(meta.router, prefix=API_PREFIX)
 app.include_router(auth.router, prefix=API_PREFIX)
 app.include_router(users.router, prefix=API_PREFIX)
-app.include_router(positions.router, prefix=API_PREFIX)
 app.include_router(roles.router, prefix=API_PREFIX)
 app.include_router(tasks.router, prefix=API_PREFIX)
 app.include_router(chat.router, prefix=API_PREFIX)
@@ -318,8 +316,5 @@ async def root():  # noqa: ANN202
         "docs": "/docs",
         "api": API_PREFIX,
         "websocket": f"{API_PREFIX}/ws",
-        "hint": (
-            "Веб-клиент не собран. Выполните flutter build web "
-            "и укажите каталог в WEB_ROOT."
-        ),
+        "hint": ("Веб-клиент не собран. Выполните flutter build web и укажите каталог в WEB_ROOT."),
     }

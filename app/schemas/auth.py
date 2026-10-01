@@ -46,20 +46,13 @@ class RoleBrief(Schema):
     permissions: list[str] = []
 
 
-class PositionBrief(Schema):
-    id: str
-    title: str
-
-
 class UserBrief(Schema):
     """Лёгкая карточка сотрудника для списков и чатов."""
 
     id: str
     username: str
     full_name: str
-    job_title: str | None = None
     avatar_url: str | None = None
-    position: PositionBrief | None = None
     is_active: bool = True
 
     @field_validator("avatar_url", mode="before")
@@ -74,9 +67,7 @@ class UserMe(Schema):
     full_name: str
     email: str | None = None
     phone: str | None = None
-    job_title: str | None = None
     avatar_url: str | None = None
-    position: PositionBrief | None = None
     roles: list[RoleBrief] = []
     permissions: list[str] = []
     is_active: bool
@@ -104,7 +95,6 @@ class UpdateProfileRequest(Schema):
     full_name: str | None = Field(default=None, min_length=2, max_length=200)
     email: EmailStr | None = None
     phone: str | None = Field(default=None, max_length=40)
-    job_title: str | None = Field(default=None, max_length=160)
 
 
 class SessionInfo(Schema):
