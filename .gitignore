@@ -25,3 +25,5 @@ data/*
 *.swp
 .DS_Store
 Thumbs.db
+server.log
+server.ready
