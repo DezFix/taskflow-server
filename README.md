@@ -1,42 +1,42 @@
 # TaskFlow Server
 
-Серверная часть TaskFlow — системы управления IT-отделом: задачи, сотрудники,
-должности, роли, чат с распознаванием голосовых сообщений, фотоотчёты
-и веб-интерфейс.
+The TaskFlow server side — an IT department management system: tasks, staff,
+positions, roles, a chat that transcribes voice messages, photo reports, and a
+web interface.
 
-Сервер ставится один раз в офисе, сотрудники подключаются к нему со своих
-телефонов и браузеров. Полный кейс проекта и архитектура — в
+The server is installed once in the office, and staff connect to it from their
+phones and browsers. The full project case and architecture are in
 [PROJECT_BRIEF.md](PROJECT_BRIEF.md).
 
-Клиент — отдельный проект: [DezFix/taskflow](https://github.com/DezFix/taskflow).
+The client is a separate project: [DezFix/taskflow](https://github.com/DezFix/taskflow).
 
 ---
 
-## Что умеет
+## Capabilities
 
-| Раздел | Возможности |
+| Area | Features |
 |---|---|
-| **Аутентификация** | Логин или email, пароли Argon2id, JWT с ротацией refresh, блокировка после N неудач, список активных сессий |
-| **Сотрудники** | Создание, блокировка, перевод на другую должность, смена ролей, сброс пароля с выдачей временного |
-| **Должности** | Создание, переименование, архивирование, запрет удаления занятой должности |
-| **Роли** | Произвольные роли с матрицей прав, системные роли неудаляемы |
-| **Задачи** | Статусы, приоритеты, сроки, метки, комментарии, история изменений, курсорная пагинация |
-| **Фотоотчёты** | Загрузка фото и документов к задаче, отчёт переводит задачу на проверку |
-| **Чат** | Личные диалоги и группы, вложения, прочитано/доставлено, редактирование, удаление |
-| **Голос** | Голосовые сообщения, распознавание на сервере через faster-whisper, ручная правка расшифровки |
-| **Отчёты** | Сводка по задачам, нагрузка по сотрудникам, выгрузка CSV для Excel |
-| **Администрирование** | Журнал действий, резервные копии, сведения о системе |
-| **Веб** | Отдаёт собранный Flutter Web-клиент, Swagger по `/docs` |
+| **Authentication** | Login or email, Argon2id passwords, JWT with refresh rotation, lockout after N failures, list of active sessions |
+| **Staff** | Creation, blocking, transfer to another position, role changes, password reset with a temporary password issued |
+| **Positions** | Creation, renaming, archiving, deletion blocked while in use |
+| **Roles** | Arbitrary roles with a permission matrix, system roles cannot be deleted |
+| **Tasks** | Statuses, priorities, deadlines, labels, comments, change history, cursor pagination |
+| **Photo reports** | Photo and document upload to a task, the report moves the task to review |
+| **Chat** | Direct dialogs and groups, attachments, read/delivered, editing, deletion |
+| **Voice** | Voice messages, server-side recognition via faster-whisper, manual transcript editing |
+| **Reports** | Task summary, staff workload, CSV export for Excel |
+| **Administration** | Action log, backups, system information |
+| **Web** | Serves the built Flutter web client, Swagger at `/docs` |
 
-## Требования
+## Requirements
 
-- Python 3.12 или новее (проверено на 3.13)
-- 2 ГБ оперативной памяти, 2 ядра CPU — для распознавания рекомендуется 4 ядра
-- 1 ГБ места на диске под данные, 2–5 ГБ под модель распознавания
+- Python 3.12 or newer (verified on 3.13)
+- 2 GB RAM, 2 CPU cores — 4 cores recommended for recognition
+- 1 GB of disk for data, 2–5 GB for the recognition model
 
-## Быстрый старт
+## Quick start
 
-### Docker (рекомендуется)
+### Docker (recommended)
 
 ```bash
 git clone https://github.com/DezFix/taskflow-server.git
@@ -44,10 +44,10 @@ cd taskflow-server
 docker compose up -d
 ```
 
-Сервер поднимется на `http://<адрес-машины>:8080`. Первый заход — мастер
-настройки: создаёт администратора и системные роли.
+The server comes up on `http://<machine-address>:8080`. The first visit is the
+setup wizard: it creates the administrator and the system roles.
 
-### Без Docker
+### Without Docker
 
 ```bash
 python -m venv .venv
@@ -56,188 +56,191 @@ python -m venv .venv
 
 pip install -e ".[dev]"
 
-# На Windows для распознавания голоса нужен Visual C++ Redistributable;
-# на Linux — ffmpeg и libsndfile1.
+# On Windows, voice recognition needs the Visual C++ Redistributable;
+# on Linux it needs ffmpeg and libsndfile1.
 
-python -m app.cli check        # проверить окружение
-python -m app.cli initdb       # создать схему и начальные данные
-python -m app.cli serve        # запустить сервер
+python -m app.cli check        # check the environment
+python -m app.cli initdb       # create the schema and initial data
+python -m app.cli serve        # start the server
 ```
 
-## Настройка
+## Configuration
 
-Все параметры — в `.env` (создайте из `.env.example`).
+All settings live in `.env` (create it from `.env.example`).
 
-| Переменная | По умолчанию | Назначение |
+| Variable | Default | Purpose |
 |---|---|---|
-| `TASKFLOW_HOST` | `0.0.0.0` | Адрес прослушивания |
-| `TASKFLOW_PORT` | `8080` | Порт |
-| `DATABASE_URL` | `sqlite+aiosqlite:///./data/taskflow.db` | Строка подключения к БД |
-| `JWT_SECRET` | генерируется | Ключ подписи токенов, минимум 32 символа |
-| `ACCESS_TOKEN_MINUTES` | `30` | Время жизни access-токена |
-| `REFRESH_TOKEN_DAYS` | `30` | Время жизни refresh-токена |
-| `MAX_UPLOAD_MB` | `25` | Максимальный размер файла |
-| `VOICE_ENABLED` | `true` | Распознавание голоса |
-| `VOICE_MODEL` | `base` | Модель: `tiny`, `base`, `small`, `medium` |
-| `VOICE_LANGUAGE` | `ru` | Язык распознавания |
-| `WEB_ROOT` | — | Каталог собранного Flutter Web |
-| `CORS_ORIGINS` | — | Разрешённые источники через запятую |
+| `TASKFLOW_HOST` | `0.0.0.0` | Listen address |
+| `TASKFLOW_PORT` | `8080` | Port |
+| `DATABASE_URL` | `sqlite+aiosqlite:///./data/taskflow.db` | Database connection string |
+| `JWT_SECRET` | generated | Token signing key, at least 32 characters |
+| `ACCESS_TOKEN_MINUTES` | `30` | Access token lifetime |
+| `REFRESH_TOKEN_DAYS` | `30` | Refresh token lifetime |
+| `MAX_UPLOAD_MB` | `25` | Maximum file size |
+| `VOICE_ENABLED` | `true` | Voice recognition |
+| `VOICE_MODEL` | `base` | Model: `tiny`, `base`, `small`, `medium` |
+| `VOICE_LANGUAGE` | `ru` | Recognition language |
+| `WEB_ROOT` | — | Directory of the built Flutter web client |
+| `CORS_ORIGINS` | — | Allowed origins, comma separated |
 
-### База данных
+### Database
 
-По умолчанию SQLite — для отдела до 10 человек этого достаточно.
-Код работает с любой СУБД через SQLAlchemy, меняется одна строка:
+SQLite is the default, which is enough for a department of up to 10 people.
+The code works with any RDBMS through SQLAlchemy, only one line changes:
 
 ```env
 # PostgreSQL
-DATABASE_URL=postgresql+asyncpg://taskflow:пароль@localhost:5432/taskflow
+DATABASE_URL=postgresql+asyncpg://taskflow:password@localhost:5432/taskflow
 
 # MySQL / MariaDB
-DATABASE_URL=mysql+aiomysql://taskflow:пароль@localhost:3306/taskflow
+DATABASE_URL=mysql+aiomysql://taskflow:password@localhost:3306/taskflow
 ```
 
-Для внешних СУБД доустановите драйверы:
+For external databases, install the drivers:
 
 ```bash
 pip install asyncpg      # PostgreSQL
 pip install aiomysql     # MySQL
 ```
 
-## Распознавание голоса
+## Voice recognition
 
-Работает полностью на сервере, без облака и API-ключей. Записи никуда не уходят.
+Runs entirely on the server, with no cloud and no API keys. Recordings go
+nowhere.
 
-| Модель | Размер | Скорость (CPU) | Когда выбирать |
+| Model | Size | Speed (CPU) | When to pick it |
 |---|---|---|---|
-| `tiny` | 75 МБ | очень быстро | черновик, короткие записки |
-| `base` | 145 МБ | быстро | **по умолчанию** — рабочий компромисс |
-| `small` | 480 МБ | средне | важная точность, короткие очереди |
-| `medium` | 1.5 ГБ | медленно | максимум точности, ночные задачи |
+| `tiny` | 75 MB | very fast | drafts, short notes |
+| `base` | 145 MB | fast | **default** — a working compromise |
+| `small` | 480 MB | moderate | accuracy matters, short queues |
+| `medium` | 1.5 GB | slow | maximum accuracy, overnight jobs |
 
-Модель скачивается один раз при первом распознавании и кэшируется
-в `data/models/`. Загрузить заранее:
+The model is downloaded once on first use and cached in `data/models/`. To
+fetch it in advance:
 
 ```bash
 python -m app.cli warmup
 ```
 
-Сменить модель на лету: `PUT /api/v1/voice/settings` или через веб-интерфейс.
+Change the model on the fly: `PUT /api/v1/voice/settings` or through the web
+interface.
 
-Если Whisper ошибся в тексте, отправитель может исправить его вручную —
-правка помечается и больше не перезаписывается.
+If Whisper got the text wrong, the sender can fix it by hand — the edit is
+marked and is no longer overwritten.
 
-> Примечание: версия PyAV закреплена `av>=11,<16`. В PyAV 16 удалён параметр
-> `metadata_errors`, который использует faster-whisper.
+> Note: the PyAV version is pinned to `av>=11,<16`. PyAV 16 removed the
+> `metadata_errors` parameter that faster-whisper uses.
 
-## Подключение извне
+## External access
 
-Три рабочих сценария — приложение поддерживает все три:
+Three real scenarios — the app supports all three:
 
-| Сценарий | Адрес | Настройка сервера |
+| Scenario | Address | Server setup |
 |---|---|---|
-| Домен через Cloudflare или nginx | `https://taskflow.example.com` | обратный прокси с сертификатом |
-| VPN внутрь офиса | `https://10.0.0.5:8080` | Самоподписанный сертификат, клиент сверяет отпечаток |
-| Локальная сеть | `http://192.168.1.50:8080` | Ничего, в доверенной сети |
+| Domain behind Cloudflare or nginx | `https://taskflow.example.com` | reverse proxy with a certificate |
+| VPN into the office | `https://10.0.0.5:8080` | self-signed certificate, the client checks the fingerprint |
+| Local network | `http://192.168.1.50:8080` | Nothing, it is a trusted network |
 
-CORS по умолчанию пропускает только зеркала текущего адреса — этого хватает
-для веб-клиента с того же сервера. Список внешних источников задаётся
-в `CORS_ORIGINS`.
+CORS by default only allows mirrors of the current address, which is enough
+for the web client served from the same server. Set the list of external
+origins in `CORS_ORIGINS`.
 
-## Команды
+## Commands
 
 ```bash
-python -m app.cli serve              # запуск сервера
-python -m app.cli serve --reload     # запуск с перезагрузкой при изменениях
-python -m app.cli check              # проверка окружения
-python -m app.cli initdb             # создать схему и начальные данные
-python -m app.cli admin              # создать администратора
-python -m app.cli admin --username ivan  # сбросить пароль сотрудника
-python -m app.cli backup             # резервная копия (база + файлы)
-python -m app.cli warmup             # загрузить модель распознавания
+python -m app.cli serve              # start the server
+python -m app.cli serve --reload     # start with reload on changes
+python -m app.cli check              # check the environment
+python -m app.cli initdb             # create the schema and initial data
+python -m app.cli admin              # create an administrator
+python -m app.cli admin --username ivan  # reset a staff password
+python -m app.cli backup             # backup (database + files)
+python -m app.cli warmup             # fetch the recognition model
 ```
 
-## Документация API
+## API documentation
 
-После запуска:
+Once the server is running:
 
 - Swagger UI — <http://localhost:8080/docs>
 - ReDoc — <http://localhost:8080/redoc>
-- Схема — <http://localhost:8080/openapi.json>
+- Schema — <http://localhost:8080/openapi.json>
 
-Порядок работы с API:
+The order of working with the API:
 
-1. `GET /api/v1/meta/info` — проверка адреса (клиент вызывает при вводе IP или домена)
-2. `POST /api/v1/auth/setup` — первоначальная настройка
-3. `POST /api/v1/auth/login` — вход, возвращает пару токенов
-4. Дальше заголовок `Authorization: Bearer <access_token>`
+1. `GET /api/v1/meta/info` — address check (the client calls it when an IP or
+   domain is entered)
+2. `POST /api/v1/auth/setup` — initial setup
+3. `POST /api/v1/auth/login` — sign in, returns a token pair
+4. After that, the `Authorization: Bearer <access_token>` header
 
-Реалтайм: `wss://<host>/api/v1/ws?token=<access_token>`.
+Realtime: `wss://<host>/api/v1/ws?token=<access_token>`.
 
-## Разработка
+## Development
 
 ```bash
 pip install -e ".[dev]"
 
-pytest -q                       # тесты
+pytest -q                       # tests
 pytest --cov=app --cov-report=term-missing
-ruff check app tests            # стиль кода
-python scripts/smoke.py         # сквозная проверка API на живом сервере
-python scripts/voice_check.py   # проверка распознавания голоса
-python scripts/check_schema.py  # состав таблиц в базе
+ruff check app tests            # code style
+python scripts/smoke.py         # end-to-end API check against a live server
+python scripts/voice_check.py   # voice recognition check
+python scripts/check_schema.py  # table composition in the database
 ```
 
-### Миграции
+### Migrations
 
-Схема создаётся автоматически при старте. Alembic нужен для серьёзных
-изменений структуры:
+The schema is created automatically on startup. Alembic is needed for serious
+structural changes:
 
 ```bash
-alembic revision --autogenerate -m "описание"
+alembic revision --autogenerate -m "description"
 alembic upgrade head
 alembic downgrade -1
 ```
 
-### Структура
+### Structure
 
 ```
 app/
-├── main.py          точка входа, lifespan, раздача веб-клиента
-├── config.py        настройки
-├── database.py      движок, сессии, базовые классы
+├── main.py          entry point, lifespan, serving the web client
+├── config.py        settings
+├── database.py      engine, sessions, base classes
 ├── security.py      Argon2, JWT
-├── deps.py          зависимости FastAPI и проверка прав
-├── errors.py        единый формат ошибок
-├── models/          SQLAlchemy-модели (18 таблиц)
-├── schemas/         Pydantic-схемы запросов и ответов
-├── api/v1/          роутеры (89 эндпоинтов)
-├── api/ws.py        WebSocket-канал реалтайма
-├── services/        бизнес-логика
-├── realtime/        хаб соединений и события
-├── serializers.py   преобразование моделей в схемы
-├── permissions.py   каталог прав и системные роли
-└── cli.py           командная строка
+├── deps.py          FastAPI dependencies and permission checks
+├── errors.py        single error format
+├── models/          SQLAlchemy models (18 tables)
+├── schemas/         Pydantic request and response schemas
+├── api/v1/          routers (89 endpoints)
+├── api/ws.py        realtime WebSocket channel
+├── services/        business logic
+├── realtime/        connection hub and events
+├── serializers.py   converting models to schemas
+├── permissions.py   permission catalogue and system roles
+└── cli.py           command line
 ```
 
-Слои: `api` (HTTP) → `services` (правила) → `models` (данные).
-Сервисы ничего не знают про HTTP, поэтому их же вызывают фоновые задачи
-и обработчики WebSocket.
+Layers: `api` (HTTP) → `services` (rules) → `models` (data). Services know
+nothing about HTTP, which is why the same functions are used by background jobs
+and WebSocket handlers.
 
-## Резервное копирование
+## Backup
 
-Автоматически: `POST /api/v1/admin/backup`. Вручную:
+Automatic: `POST /api/v1/admin/backup`. Manually:
 
 ```bash
 python -m app.cli backup
 ```
 
-Архив содержит `database/taskflow.db` и все загруженные файлы.
-Для SQLite копия снимается через WAL-чекпоинт, поэтому файл всегда целостный.
+The archive contains `database/taskflow.db` and all uploaded files. For SQLite
+the copy is taken through a WAL checkpoint, so the file is always consistent.
 
-Восстановление: остановите сервер, замените `data/taskflow.db` файлом
-из архива и верните каталог `data/storage`. Файлы можно вернуть
-через `POST /api/v1/admin/backups/{id}/restore`.
+Restore: stop the server, replace `data/taskflow.db` with the file from the
+archive, and put back the `data/storage` directory. Files can also be restored
+through `POST /api/v1/admin/backups/{id}/restore`.
 
-Для регулярных копий настройте задачу в планировщике:
+For regular backups, set up a scheduler task:
 
 ```bash
 # Windows: Task Scheduler
@@ -246,34 +249,35 @@ python -m app.cli backup
 0 2 * * * cd /opt/taskflow && python -m app.cli backup
 ```
 
-## Безопасность
+## Security
 
-- Пароли хранятся в виде Argon2id-хешей, необратимо
-- Refresh-токены хранятся в БД только в виде SHA-256: утечка базы не даёт войти
-- Смена пароля гасит все активные сессии
-- Блокировка учётной записи после 10 неудачных попыток на 15 минут
-- Загрузки ограничены белым списком расширений, проверяется сигнатура файла
-  (переименованный `.exe` в `.jpg` не пройдёт)
-- Имена файлов на диске случайные, путь из имени не используется
-- SQL-инъекции невозможны: только параметризованные запросы SQLAlchemy
-- CORS по умолчанию закрыт для посторонних источников
-- Права проверяются централизованно, каждый эндпоинт объявляет требуемое право
-- Журнал действий фиксирует, кто, что и когда сделал
+- Passwords are stored as irreversible Argon2id hashes
+- Refresh tokens are stored in the database only as SHA-256: a database leak
+  does not grant access
+- Changing the password revokes all active sessions
+- Account lockout for 15 minutes after 10 failed attempts
+- Uploads are restricted by an extension allowlist, and the file signature is
+  verified (a renamed `.exe` will not pass as `.jpg`)
+- On-disk file names are random, the path is never taken from the name
+- SQL injection is impossible: only parameterised SQLAlchemy queries are used
+- CORS is closed to third-party origins by default
+- Permissions are checked centrally, every endpoint declares what it requires
+- The action log records who did what and when
 
-Что стоит доделать перед публичным доступом в интернет:
+Worth doing before public internet access:
 
-- Задать свой `JWT_SECRET`
-- Поставить сервер за HTTPS-прокси с нормальным сертификатом
-- Настроить `CORS_ORIGINS`, если веб-клиент живёт на другом домене
-- Ограничить доступ к порту firewall-ом или VPN
+- Set your own `JWT_SECRET`
+- Put the server behind an HTTPS proxy with a proper certificate
+- Configure `CORS_ORIGINS` if the web client lives on another domain
+- Restrict access to the port with a firewall or VPN
 
-## Лицензия
+## Licence
 
-MIT. См. [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
 
 ## Contributing
 
-Присылайте изменения через pull request. Перед отправкой:
+Send changes through a pull request. Before submitting:
 
 ```bash
 ruff check app tests

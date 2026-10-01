@@ -1,58 +1,61 @@
-# TaskFlow Server — полный кейс проекта
+# TaskFlow Server — full project case
 
-> Онлайн-система управления IT-отделом: задачи, сотрудники, должности, роли,
-> чат с распознаванием голосовых сообщений, фотоотчёты, веб-интерфейс.
-> Разворачивается на сервере внутри любого офиса.
+> An online IT department management system: tasks, staff, positions, roles, a
+> chat that transcribes voice messages, photo reports, and a web interface.
+> Deployed on a server inside any office.
 
 ---
 
-## 1. Назначение
+## 1. Purpose
 
-Компания/офис ставит у себя один сервер. Все сотрудники отдела подключаются к нему
-со своих телефонов (Android) или браузера (Web) и работают в едином пространстве.
+A company/office installs one server of its own. All department staff connect to
+it from their phones (Android) or browsers (Web) and work in a single space.
 
-Три сценария подключения (реализованы все):
+Three connection scenarios (all implemented):
 
-| Сценарий | Адрес сервера | Пример |
+| Scenario | Server address | Example |
 |---|---|---|
-| Публичный домен через Cloudflare | `https://taskflow.example.com` | `https://` |
-| VPN внутрь офиса | `https://10.10.0.5:8443` (LAN-сертификат) | самоподписанный TLS |
-| Локальная сеть без TLS | `http://192.168.1.50:8080` | cleartext, только в доверенной сети |
+| Public domain behind Cloudflare | `https://taskflow.example.com` | `https://` |
+| VPN into the office | `https://10.10.0.5:8443` (LAN certificate) | self-signed TLS |
+| Local network without TLS | `http://192.168.1.50:8080` | cleartext, trusted network only |
 
-Приложение при первом запуске спрашивает адрес сервера, проверяет доступность
-и запоминает его. Несколько адресов можно сохранить и переключать.
+On first launch the app asks for the server address, checks availability, and
+remembers it. Several addresses can be saved and switched between.
 
-## 2. Два рабочих пространства
+## 2. Two workspaces
 
-Один код, два режима — переключение происходит по правам пользователя.
+One codebase, two modes — the switch happens based on user permissions.
 
-**Глава отдела (управленец)**
-- Сотрудники: создание, блокировка, смена ролей и должностей, сброс пароля
-- Должности: создание, переименование, архивирование
-- Роли: создание, матрица прав, назначение сотрудникам
-- Все задачи отдела: создание, назначение, сроки, приоритеты, контроль
-- Чаты: все переписки, создание групп
-- Отчёты: сводка по задачам и сотрудникам, выгрузка
-- Настройки: профиль, параметры ИИ-расшифровки, резервные копии
+**Department head (manager)**
+- Staff: creation, blocking, role and position changes, password reset
+- Positions: creation, renaming, archiving
+- Roles: creation, permission matrix, assignment to staff
+- All department tasks: creation, assignment, deadlines, priorities, control
+- Chats: all conversations, group creation
+- Reports: summary by tasks and staff, export
+- Settings: profile, AI transcription options, backups
 
-**Сотрудник (исполнитель)**
-- Профиль: фото, имя, должность, контакты
-- Мои задачи: список, фильтры, смена статуса, комментарии, фотоотчёт
-- Чат: личные диалоги и группы, голосовые сообщения
-- Уведомления о новых задачах, дедлайнах, сообщениях
-- Не видит управленческих разделов и чужих задач, кроме тех, что ему выдали
+**Staff member (executor)**
+- Profile: photo, name, position, contacts
+- My tasks: list, filters, status change, comments, photo report
+- Chat: direct dialogs and groups, voice messages
+- Notifications about new tasks, deadlines, messages
+- Does not see management sections or other people's tasks, except the ones
+  assigned to them
 
-## 3. Роли и права
+## 3. Roles and permissions
 
-Гибкая матрица прав, а не жёсткие три роли. Каждая роль — набор булевых прав.
+A flexible permission matrix rather than three rigid roles. Each role is a set
+of boolean permissions.
 
-**Системные роли создаются при первом старте (их нельзя удалить):**
+**System roles are created on first start (they cannot be deleted):**
 
-- `Администратор` — все права, включая системные настройки
-- `Глава отдела` — управление отделом, без системных настроек
-- `Сотрудник` — только свои задачи, чат, профиль
+- `Администратор` (Administrator) — all permissions, including system settings
+- `Глава отдела` (Department head) — department management, without system
+  settings
+- `Сотрудник` (Staff member) — own tasks, chat, profile only
 
-**Права (41 штука), сгруппированные:**
+**Permissions (41 of them), grouped:**
 
 ```
 users.view, users.create, users.edit, users.delete, users.reset_password
@@ -67,118 +70,119 @@ settings.view, settings.edit, settings.manage_roles,
 settings.backup, settings.audit_log
 ```
 
-Проверка прав — централизованная зависимость `require_perm(...)`.
-Каждый эндпоинт объявляет требуемое право декларативно, список попадает
-в OpenAPI и в `GET /api/v1/meta/permissions`.
+Permission checks are centralised in the `require_perm(...)` dependency. Each
+endpoint declares the permission it needs declaratively, and the list ends up
+in OpenAPI and in `GET /api/v1/meta/permissions`.
 
-## 4. Функциональные блоки
+## 4. Functional blocks
 
-### 4.1 Аутентификация
-- Логин по логину (или email) + пароль
-- Пароли: Argon2id, политика сложности, блокировка после N неудач
-- JWT: access (короткий, 30 мин) + refresh (30 дней, хранится в БД, ротация)
-- Устройства можно посмотреть и отозвать refresh-токен
-- Изменение пароля требует текущего; смена всех сессий — опция
-- Первый запуск: мастер настройки создаёт администратора
+### 4.1 Authentication
+- Sign in with a username (or email) and password
+- Passwords: Argon2id, a complexity policy, lockout after N failures
+- JWT: access (short, 30 min) + refresh (30 days, stored in the DB, rotated)
+- Devices can be listed and their refresh token revoked
+- A password change requires the current one; changing all sessions is an option
+- First launch: the setup wizard creates an administrator
 
-### 4.2 Сотрудники и должности
-- Сотрудник: ФИО, логин, email, телефон, должность, роли, фото, статус
-- Должность: название, описание, порядок, активна/архив
-- Создание сотрудника выдаёт временный пароль, показывается один раз
-- Мягкое удаление: `is_active=False`, история задач и чатов сохраняется
+### 4.2 Staff and positions
+- Staff member: full name, username, email, phone, position, roles, photo, status
+- Position: title, description, order, active/archived
+- Creating a staff member issues a temporary password, shown once
+- Soft delete: `is_active=False`, task and chat history is preserved
 
-### 4.3 Задачи
-- Поля: заголовок, описание, исполнитель, автор, статус, приоритет,
-  дедлайн, теги, проект/папка, метка времени
-- Статусы: `new`, `in_progress`, `review`, `done`, `cancelled`
-- Приоритеты: `low`, `normal`, `high`, `urgent`
-- Комментарии с вложениями
-- Смена статуса фиксируется в истории (`task_history`) — журнал изменений
-- Фильтры: по исполнителю, статусу, приоритету, дедлайну, тегу, тексту
-- Пагинация курсором для больших списков
+### 4.3 Tasks
+- Fields: title, description, assignee, author, status, priority, deadline,
+  tags, project/folder, time label
+- Statuses: `new`, `in_progress`, `review`, `done`, `cancelled`
+- Priorities: `low`, `normal`, `high`, `urgent`
+- Comments with attachments
+- A status change is recorded in the history (`task_history`) — a change log
+- Filters: by assignee, status, priority, deadline, tag, text
+- Cursor pagination for large lists
 
-### 4.4 Фотоотчёты о выполненной работе
-- Файл прикрепляется к задаче или комментарию
-- Хранилище на диске, метаданные в БД
-- Типы: фото, документ, аудио; ограничение размера (по умолчанию 25 МБ)
-- Выдача по короткому токену-ссылке, доступ контролируется правами
-- Сжатие превью для больших фото
+### 4.4 Photo reports on completed work
+- A file is attached to a task or a comment
+- Storage on disk, metadata in the DB
+- Types: photo, document, audio; size limit (25 MB by default)
+- Served via a short token link, access controlled by permissions
+- Preview compression for large photos
 
-### 4.5 Чат
-- Личные диалоги (1-на-1) и группы
-- Сообщения: текст, изображения, файлы, **голосовые**
-- Состояния доставки: отправлено, доставлено, прочитано
-- Метки времени, редактирование, удаление у всех
-- Непрочитанные счётчики в списке чатов
-- Реалтайм через WebSocket
+### 4.5 Chat
+- Direct dialogs (1-on-1) and groups
+- Messages: text, images, files, **voice**
+- Delivery states: sent, delivered, read
+- Time labels, editing, deletion for everyone
+- Unread counters in the chat list
+- Realtime via WebSocket
 
-### 4.6 Голосовые сообщения и ИИ-разбор
-- Голосовое записывается в приложении, загружается на сервер
-- Сервер в фоне расшифровывает через **faster-whisper** (CTranslate2)
-- Модель по умолчанию `base`, доступны `small`/`medium` — выбор в настройках
-- Работает **офлайн**, без облака и без API-ключей
-- Расшифровка в статусе `pending` → `done` / `failed`
-- Приходит пуш в чат, когда текст готов
-- Отдельная сущность `transcripts` хранит текст, язык, длительность, модель
-- Аудио нормализуется чисто на Python (PyAV), без внешнего ffmpeg
-- Кэш моделей в `data/models/`, скачивается при первом использовании
+### 4.6 Voice messages and AI transcription
+- A voice message is recorded in the app and uploaded to the server
+- The server transcribes it in the background via **faster-whisper**
+  (CTranslate2)
+- Default model `base`, `small`/`medium` available — chosen in settings
+- Works **offline**, with no cloud and no API keys
+- Transcription goes `pending` → `done` / `failed`
+- A push arrives in the chat when the text is ready
+- A separate `transcripts` entity holds text, language, duration, model
+- Audio is normalised purely in Python (PyAV), with no external ffmpeg
+- Model cache in `data/models/`, downloaded on first use
 
-### 4.7 Веб-интерфейс
-- Тот же Flutter-код, собирается в статику (`flutter build web`)
-- Сервер отдаёт статику на `/`, SPA-роутинг через fallback
-- Вход в браузере — та же учётка, что и в приложении
-- WebSocket работает на той же платформе
+### 4.7 Web interface
+- The same Flutter code, built to static files (`flutter build web`)
+- The server serves the static files at `/`, SPA routing via fallback
+- Signing in from a browser uses the same account as the app
+- WebSocket works on the same platform
 
-### 4.8 Уведомления
-- WebSocket-канал для реалтайма
-- Локальные пуш-уведомления на Android (flutter_local_notifications)
-- Внутри приложения — счётчики и бейджи
+### 4.8 Notifications
+- A WebSocket channel for realtime
+- Local push notifications on Android (flutter_local_notifications)
+- Inside the app — counters and badges
 
-### 4.9 Аудит и бэкап
-- `audit_log`: кто, что, когда, из какого IP
-- Ручной бэкап SQLite/состояния в архив, скачивание, автовосстановление
+### 4.9 Audit and backup
+- `audit_log`: who, what, when, from which IP
+- Manual backup of SQLite/state into an archive, download, automatic restore
 
-## 5. Архитектура
+## 5. Architecture
 
 ```
 taskflow-server/
 ├── app/
-│   ├── main.py              точка входа, lifespan, монтирование статики
-│   ├── config.py            настройки (env, pydantic-settings)
-│   ├── database.py          engine, session, async-обёртка
-│   ├── security.py          JWT, Argon2, токены
-│   ├── deps.py              зависимости FastAPI (current_user, require_perm)
-│   ├── errors.py            единый формат ошибок
-│   ├── models/              SQLAlchemy-модели
+│   ├── main.py              entry point, lifespan, static file mounting
+│   ├── config.py            settings (env, pydantic-settings)
+│   ├── database.py          engine, session, async wrapper
+│   ├── security.py          JWT, Argon2, tokens
+│   ├── deps.py              FastAPI dependencies (current_user, require_perm)
+│   ├── errors.py            single error format
+│   ├── models/              SQLAlchemy models
 │   │   ├── base.py user.py position.py role.py task.py chat.py
 │   │   ├── file.py voice.py audit.py
-│   ├── schemas/             Pydantic-схемы (request/response)
-│   ├── api/                 роутеры
+│   ├── schemas/             Pydantic schemas (request/response)
+│   ├── api/                 routers
 │   │   ├── v1/
 │   │   │   ├── auth.py users.py positions.py roles.py
 │   │   │   ├── tasks.py comments.py chat.py messages.py
 │   │   │   ├── files.py voice.py reports.py admin.py
-│   │   ├── ws.py            WebSocket-хаб
-│   ├── services/            бизнес-логика
+│   │   ├── ws.py            WebSocket hub
+│   ├── services/            business logic
 │   │   ├── auth.py tasks.py chat.py files.py
-│   │   ├── voice.py         оркестрация Whisper
+│   │   ├── voice.py         Whisper orchestration
 │   │   ├── reports.py backup.py audit.py
-│   ├── realtime/            ConnectionManager, события
-│   ├── seed.py              стартовые данные
-│   └── web/                 отдача Flutter Web
-├── alembic/                 миграции
+│   ├── realtime/            ConnectionManager, events
+│   ├── seed.py              initial data
+│   └── web/                 serving Flutter Web
+├── alembic/                 migrations
 ├── tests/                   pytest
-├── data/                    БД, файлы, модели (в .gitignore)
+├── data/                    database, files, models (in .gitignore)
 ├── Dockerfile
 ├── docker-compose.yml
 └── pyproject.toml
 ```
 
-**Слои:** `api` (HTTP) → `services` (правила) → `models` (данные).
-Сервисы не знают про HTTP — только про бизнес-правила. Это позволяет
-переиспользовать их из WebSocket-обработчиков и фоновых задач.
+**Layers:** `api` (HTTP) → `services` (rules) → `models` (data). Services know
+nothing about HTTP — only about business rules. This lets the same functions be
+reused from WebSocket handlers and background jobs.
 
-## 6. Модель данных
+## 6. Data model
 
 ```
 users ──┬── user_roles ── roles
@@ -193,106 +197,109 @@ tasks ──┬── task_comments ── (files)
 messages ──┬── files
             └── transcripts (voice, 1:1)
 
-sessions (refresh-токены), audit_log, settings_kv, attachments
+sessions (refresh tokens), audit_log, settings_kv, attachments
 ```
 
-Ключевые решения:
-- Первичные ключи — строковые UUID (совместимо с любым бэгендом, не泄露 счётчиков)
-- Время — UTC, в БД naive, сериализуется в ISO-8601 с `Z`
-- Мягкое удаление через `is_active` / `deleted_at`
-- JSON-колонки для прав ролей и метаданных файлов (переносимо между БД)
+Key decisions:
+- Primary keys are string UUIDs (compatible with any backend, do not leak
+  counters)
+- Time is UTC, naive in the DB, serialised to ISO-8601 with `Z`
+- Soft delete via `is_active` / `deleted_at`
+- JSON columns for role permissions and file metadata (portable across DBs)
 
-## 7. Совместимость с базами
+## 7. Database compatibility
 
-Код работает через SQLAlchemy 2.0, драйвер выбирается из `DATABASE_URL`:
+The code works through SQLAlchemy 2.0, the driver is chosen from `DATABASE_URL`:
 
 ```env
-DATABASE_URL=sqlite+aiosqlite:///./data/taskflow.db     # по умолчанию
+DATABASE_URL=sqlite+aiosqlite:///./data/taskflow.db     # default
 DATABASE_URL=postgresql+asyncpg://user:pass@host/db   # PostgreSQL
 DATABASE_URL=mysql+aiomysql://user:pass@host/db       # MySQL/MariaDB
 ```
 
-Типы колонок выбираются абстрактно, миграции Alembic одинаковые.
-Для SQLite включается WAL и `foreign_keys=ON` — иначе внешние ключи
-и конкурентная запись работают неправильно.
+Column types are chosen abstractly, the Alembic migrations are identical. For
+SQLite, WAL and `foreign_keys=ON` are enabled — otherwise foreign keys and
+concurrent writes behave incorrectly.
 
-## 8. Транспорт и безопасность
+## 8. Transport and security
 
-- Раздача статики и API на одном порту — один процесс, одна база, один адрес
-- CORS: по умолчанию только зеркала текущего origin, список расширяется в `.env`
-- WebSocket: проверка JWT в query-параметре, heartbeat каждые 25 секунд
-- Ограничение частоты запросов на `/auth/*` (встроенный, без Redis)
-- Загрузки: белый список расширений, лимит размера, случайные имена на диске
-- JWT-секрет генерируется при первом старте и хранится в `data/secret.key`
-  в открытом виде только в dev-режиме
+- Static files and API on one port — one process, one database, one address
+- CORS: by default only mirrors of the current origin, the list is extended in
+  `.env`
+- WebSocket: JWT checked in the query parameter, heartbeat every 25 seconds
+- Rate limiting on `/auth/*` (built-in, no Redis)
+- Uploads: extension allowlist, size limit, random names on disk
+- The JWT secret is generated on first start and stored in `data/secret.key`,
+  in plaintext only in dev mode
 
-## 9. API (основное)
+## 9. API (main)
 
-Все маршруты под `/api/v1`.
+All routes are under `/api/v1`.
 
 ```
-POST   /auth/setup                 мастер первого запуска
-POST   /auth/login                 вход
-POST   /auth/refresh               обновление токена
-POST   /auth/logout                выход
-POST   /auth/logout-all            завершить все сессии
-GET    /auth/me                    текущий пользователь
+POST   /auth/setup                 first-launch wizard
+POST   /auth/login                 sign in
+POST   /auth/refresh               token refresh
+POST   /auth/logout                sign out
+POST   /auth/logout-all            end all sessions
+GET    /auth/me                    current user
 POST   /auth/change-password
 
-GET    /users                      список сотрудников
-POST   /users                      создать сотрудника
-GET    /users/{id}                 карточка
-PATCH  /users/{id}                 изменить
-POST   /users/{id}/reset-password  сброс пароля
-POST   /users/{id}/deactivate      деактивация
+GET    /users                      staff list
+POST   /users                      create staff
+GET    /users/{id}                 card
+PATCH  /users/{id}                 edit
+POST   /users/{id}/reset-password  password reset
+POST   /users/{id}/deactivate      deactivation
 
 GET    /positions   POST /positions   PATCH/DELETE /positions/{id}
 
 GET    /roles   POST /roles   PATCH/DELETE /roles/{id}
-GET    /meta/permissions             каталог всех прав
+GET    /meta/permissions             catalogue of all permissions
 
-GET    /tasks                    список с фильтрами
-POST   /tasks                    создать
-GET    /tasks/{id}               карточка с историей
-PATCH  /tasks/{id}               изменить
-POST   /tasks/{id}/status        сменить статус
-POST   /tasks/{id}/assign        назначить исполнителя
+GET    /tasks                    list with filters
+POST   /tasks                    create
+GET    /tasks/{id}               card with history
+PATCH  /tasks/{id}               edit
+POST   /tasks/{id}/status        change status
+POST   /tasks/{id}/assign        assign an assignee
 GET    /tasks/{id}/comments
-POST   /tasks/{id}/comments     с вложениями
+POST   /tasks/{id}/comments     with attachments
 
-GET    /chats                    список чатов с непрочитанными
-POST   /chats/direct             начать личный диалог
-POST   /chats/groups             создать группу
-GET    /chats/{id}               детали
-GET    /chats/{id}/messages      пагинация
-POST   /chats/{id}/messages      отправить (multipart: текст/файл/голос)
-POST   /chats/{id}/read          отметить прочитанным
+GET    /chats                    chat list with unread counts
+POST   /chats/direct             start a direct dialog
+POST   /chats/groups             create a group
+GET    /chats/{id}               details
+GET    /chats/{id}/messages      pagination
+POST   /chats/{id}/messages      send (multipart: text/file/voice)
+POST   /chats/{id}/read          mark as read
 
-POST   /files                    загрузка (multipart)
-GET    /files/{id}               метаданные
-GET    /files/{id}/download      содержимое
-GET    /files/{id}/preview       сжатое превью
+POST   /files                    upload (multipart)
+GET    /files/{id}               metadata
+GET    /files/{id}/download      content
+GET    /files/{id}/preview       compressed preview
 
-GET    /voice/{message_id}       статус расшифровки
-POST   /voice/{message_id}/retry повторить
-GET    /voice/settings           параметры модели
-PUT    /voice/settings           изменить параметры
+GET    /voice/{message_id}       transcription status
+POST   /voice/{message_id}/retry retry
+GET    /voice/settings           model options
+PUT    /voice/settings           change options
 
-GET    /reports/tasks-summary    сводка по задачам
-GET    /reports/user-load        нагрузка по сотрудникам
-GET    /reports/export           выгрузка CSV
+GET    /reports/tasks-summary    task summary
+GET    /reports/user-load        staff workload
+GET    /reports/export           CSV export
 
-GET    /admin/audit              журнал действий
-POST   /admin/backup             создать бэкап
-GET    /admin/backups            список бэкапов
-GET    /ws                       реалтайм-канал
+GET    /admin/audit              action log
+POST   /admin/backup             create a backup
+GET    /admin/backups            backup list
+GET    /ws                       realtime channel
 ```
 
-Документация: `/docs` (Swagger), `/redoc`, схема OpenAPI в `/openapi.json`.
+Documentation: `/docs` (Swagger), `/redoc`, the OpenAPI schema at
+`/openapi.json`.
 
-## 10. Реалтайм-события
+## 10. Realtime events
 
-WebSocket `/api/v1/ws?token=JWT`. Сервер шлёт:
+WebSocket `/api/v1/ws?token=JWT`. The server sends:
 
 ```json
 {"type": "message.created",   "data": {...}}
@@ -304,43 +311,46 @@ WebSocket `/api/v1/ws?token=JWT`. Сервер шлёт:
 {"type": "ping"}
 ```
 
-Клиент на Android и Web использует один и тот же протокол.
+The Android and web clients use the same protocol.
 
-## 11. Тестирование
+## 11. Testing
 
-- **Сервер:** pytest, изолированная БД на тест, фикстура ролей и пользователей.
-  Покрытие: аутентификация, матрица прав, задачи, чат, файлы, голос, отчёты.
-  Цель — все тесты зелёные, без пропусков и утечки данных между тестами.
-- **Клиент:** `flutter test` — юнит-тесты моделей, стейт-менеджеров,
-  вьюмоделей, парсера дат и сериализации.
+- **Server:** pytest, an isolated database per test run, fixtures for roles and
+  users. Coverage: authentication, the permission matrix, tasks, chat, files,
+  voice, reports. The goal is all tests green, with no skips and no data leaking
+  between tests.
+- **Client:** `flutter test` — unit tests for models, state managers, view
+  models, the date parser and serialisation.
 
-## 12. Поставка
+## 12. Delivery
 
-- **Docker:** `docker compose up` поднимает сервер с БД и статикой веба
-- **CI:** GitHub Actions — тесты сервера, тесты клиента, сборка APK в Releases
-- **Keystore:** debug — генерируется автоматически; release — пароли в Secrets
-- **Лицензия:** MIT
-- **Репозитории:** `DezFix/taskflow` (клиент), `DezFix/taskflow-server` (сервер)
+- **Docker:** `docker compose up` brings up the server with its database and the
+  web static files
+- **CI:** GitHub Actions — server tests, client tests, APK build in Releases
+- **Keystore:** debug — generated automatically; release — passwords in Secrets
+- **Licence:** MIT
+- **Repositories:** `DezFix/taskflow` (client), `DezFix/taskflow-server`
+  (server)
 
-## 13. Этапы разработки
+## 13. Development stages
 
-| Этап | Содержание | Готовность |
+| Stage | Content | Status |
 |---|---|---|
-| 1 | Каркас, конфиги, БД, модели, миграции | база готова |
-| 2 | Аутентификация, роли, права | вход работает |
-| 3 | Пользователи, должности, роли в UI и API | управление отделом |
-| 4 | Задачи, комментарии, история | задачи работают |
-| 5 | Файлы, фотоотчёты | отчёты работают |
-| 6 | Чат + WebSocket | чат работает |
-| 7 | Голос + Whisper | голос работает |
-| 8 | Отчёты, аудит, бэкап | администрирование |
-| 9 | Flutter-клиент: все экраны | приложение готово |
-| 10 | Тесты, CI, Docker, сборка APK | можно разворачивать |
+| 1 | Skeleton, configs, database, models, migrations | base ready |
+| 2 | Authentication, roles, permissions | sign-in works |
+| 3 | Users, positions, roles in UI and API | department management |
+| 4 | Tasks, comments, history | tasks work |
+| 5 | Files, photo reports | reports work |
+| 6 | Chat + WebSocket | chat works |
+| 7 | Voice + Whisper | voice works |
+| 8 | Reports, audit, backup | administration |
+| 9 | Flutter client: all screens | app ready |
+| 10 | Tests, CI, Docker, APK build | ready to deploy |
 
-## 14. Что осознанно не входит в MVP
+## 14. Deliberately out of the MVP
 
-- LLM-ассистент (сводки, извлечение задач) — точка расширения заложена
-- Push через Firebase — только локальные уведомления
-- Офлайн-режим с синхронизацией
-- Несколько отделов в одной инсталляции
-- Видеозвонки
+- LLM assistant (summaries, task extraction) — the extension point is in place
+- Push via Firebase — local notifications only
+- Offline mode with synchronisation
+- Several departments in one installation
+- Video calls
