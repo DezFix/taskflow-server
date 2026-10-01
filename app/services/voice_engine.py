@@ -28,6 +28,29 @@ TARGET_SAMPLE_RATE = 16_000
 #: между точностью и скоростью на CPU.
 AVAILABLE_MODELS = ("tiny", "base", "small", "medium")
 COMPUTE_TYPES = ("int8", "int8_float16", "float16", "float32")
+# Языки распознавания в кодах ISO 639-1. Список закрытый: значение этой
+# настройки попадает в файл .env, и без проверки перевод строки внутри
+# значения превращался в новую переменную окружения — вплоть до
+# подмены JWT_SECRET.
+AVAILABLE_LANGUAGES = (
+    "ar",
+    "de",
+    "en",
+    "es",
+    "fr",
+    "hi",
+    "it",
+    "ja",
+    "ko",
+    "nl",
+    "pl",
+    "pt",
+    "ru",
+    "sv",
+    "tr",
+    "uk",
+    "zh",
+)
 
 
 @dataclass
@@ -340,9 +363,20 @@ class VoiceEngine:
 
 
 def _format_env(value: Any) -> str:
+    """Приводит значение к строке для записи в .env.
+
+    Перевод строки и символы, которые .env считает началом новой
+    переменной, срезаются. Иначе значение вида "ru\nJWT_SECRET=..." легло
+    бы в файл двумя строками и подменило секрет подписи токенов.
+    """
     if isinstance(value, bool):
         return "true" if value else "false"
-    return str(value)
+    text = str(value)
+    cleaned = "".join(ch for ch in text if ch not in "\r\n\x00")
+    # Значение не должно содержать разделитель: иначе строка распалась бы
+    # на «ключ=» и «значение» при чтении.
+    cleaned = cleaned.replace("=", "_")
+    return cleaned.strip()
 
 
 class ThreadPoolExecutorSingleton:

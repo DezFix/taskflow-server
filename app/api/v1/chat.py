@@ -139,6 +139,9 @@ async def create_group(
     )
     chat = await chat_service.load_chat_for_member(session, chat.id, user.id)
 
+    # Фиксируем до рассылки: коммит по умолчанию выполняется в
+    # зависимости уже после возврата из обработчика, поэтому событие
+    await session.commit()
     await hub.send_to_users(
         {m.user_id for m in chat.members},
         EVENT_CHAT_UPDATED,
@@ -223,6 +226,9 @@ async def update_group(
 
     await session.flush()
     chat = await chat_service.load_chat_for_member(session, chat.id, user.id)
+    # Фиксируем до рассылки: коммит по умолчанию выполняется в
+    # зависимости уже после возврата из обработчика, поэтому событие
+    await session.commit()
     await hub.send_to_users(
         {m.user_id for m in chat.members},
         EVENT_CHAT_UPDATED,
@@ -291,6 +297,12 @@ async def send_message(
     )
     message = await _reload(session, message)
 
+    # Фиксируем до рассылки. Коммит по умолчанию происходит в зависимости
+    # уже после возврата из обработчика, то есть событие уходило клиентам
+    # раньше, чем данные оказывались в базе: при сбое коммита все видели
+    # сообщение, которого в переписке не было.
+    await session.commit()
+
     recipients = {m.user_id for m in chat.members if m.left_at is None}
     await hub.send_to_users(
         recipients,
@@ -315,7 +327,7 @@ async def send_file(
     user: User = Depends(require_perm("files.upload", "chat.direct")),
 ) -> MessageOut:
     chat = await chat_service.load_chat_for_member(session, chat_id, user.id)
-    data = await file.read()
+    data = await files_service.read_upload(file)
     attachment = await files_service.save_upload(
         data,
         file.filename or "file",
@@ -331,6 +343,9 @@ async def send_file(
     )
     message = await _reload(session, message)
 
+    # Фиксируем до рассылки: коммит по умолчанию выполняется в
+    # зависимости уже после возврата из обработчика, поэтому событие
+    await session.commit()
     await hub.send_to_users(
         {m.user_id for m in chat.members if m.left_at is None},
         EVENT_MESSAGE_CREATED,
@@ -358,15 +373,14 @@ async def send_voice(
     duration_sec: Annotated[
         float | None, Form(description="Длительность записи в секундах")
     ] = None,
-    user: User = Depends(require_perm("chat.direct")),
+    # Право на файлы требуется и здесь. Раньше голосовое требовало только
+    # `chat.direct`, и им можно было обойти запрет на загрузку файлов:
+    # любой сотрудник заливал вложение с белым расширением через этот маршрут.
+    user: User = Depends(require_perm("files.upload", "chat.direct")),
 ) -> MessageOut:
-    if not get_settings().voice_enabled and not has_perm(user, "voice.transcribe"):
-        # Голосовое принимаем всегда: даже без распознавания это способ
-        # передать аудио. Право voice.transcribe даёт доступ к настройке.
-        pass
 
     chat = await chat_service.load_chat_for_member(session, chat_id, user.id)
-    data = await file.read()
+    data = await files_service.read_upload(file)
     if not data:
         raise bad_request("file_empty", "Аудиофайл пуст")
 
@@ -392,6 +406,9 @@ async def send_voice(
     )
     message = await _reload(session, message)
 
+    # Фиксируем до рассылки: коммит по умолчанию выполняется в
+    # зависимости уже после возврата из обработчика, поэтому событие
+    await session.commit()
     await hub.send_to_users(
         {m.user_id for m in chat.members if m.left_at is None},
         EVENT_MESSAGE_CREATED,
@@ -428,6 +445,9 @@ async def mark_read(
     )
 
     if read_ids:
+        # Фиксируем до рассылки: коммит по умолчанию выполняется в
+        # зависимости уже после возврата из обработчика, поэтому событие
+        await session.commit()
         await hub.send_to_users(
             {m.user_id for m in chat.members if m.left_at is None},
             EVENT_MESSAGE_READ,
@@ -455,11 +475,17 @@ async def edit_message(
     message = await session.get(Message, message_id)
     if message is None or message.deleted_at is not None:
         raise not_found("message_not_found", "Сообщение не найдено")
+    # Членство проверяется до авторства: раньше её не было вовсе, и
+    # ушедший из группы сотрудник продолжал править там свои сообщения.
+    await chat_service.load_chat_for_member(session, message.chat_id, user.id)
     if message.sender_id != user.id:
         raise forbidden("not_your_message", "Можно править только свои сообщения")
 
     await chat_service.edit_message(session, message, payload.body)
     message = await _reload(session, message)
+    # Фиксируем до рассылки: коммит по умолчанию выполняется в
+    # зависимости уже после возврата из обработчика, поэтому событие
+    await session.commit()
     await hub.send_to_users(
         await chat_service.member_ids(session, message.chat_id),
         EVENT_MESSAGE_UPDATED,
@@ -481,13 +507,19 @@ async def delete_message(
 ) -> OkMessage:
     message = await session.get(Message, message_id)
     if message is None:
-        raise not_found("message_not_found", "Сообщение не найден")
+        raise not_found("message_not_found", "Сообщение не найдено")
+
+    # Членство требуется и здесь. Запрос ниже искал запись админа группы
+    # без учёта left_at, поэтому снятый с группы администратор сохранял
+    # право удалять чужие сообщения.
+    await chat_service.load_chat_for_member(session, message.chat_id, user.id)
 
     is_admin = await session.scalar(
         select(func.count(ChatMember.id)).where(
             ChatMember.chat_id == message.chat_id,
             ChatMember.user_id == user.id,
             ChatMember.is_admin.is_(True),
+            ChatMember.left_at.is_(None),
         )
     )
     if message.sender_id != user.id and not is_admin and not has_perm(user, "settings.manage_roles"):
@@ -495,6 +527,9 @@ async def delete_message(
 
     chat_id = message.chat_id
     await chat_service.delete_message(session, message, user)
+    # Фиксируем до рассылки: коммит по умолчанию выполняется в
+    # зависимости уже после возврата из обработчика, поэтому событие
+    await session.commit()
     await hub.send_to_users(
         await chat_service.member_ids(session, chat_id),
         EVENT_MESSAGE_DELETED,
@@ -532,6 +567,9 @@ async def fix_transcript(
 
     await voice_jobs.save_manual_transcript(session, transcript, message, payload.body)
 
+    # Фиксируем до рассылки: коммит по умолчанию выполняется в
+    # зависимости уже после возврата из обработчика, поэтому событие
+    await session.commit()
     await hub.send_to_users(
         await chat_service.member_ids(session, message.chat_id),
         "transcript.ready",

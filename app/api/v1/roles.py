@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 
-from app.deps import SessionDep, require_perm
+from app.deps import SessionDep, ensure_can_grant, require_perm
 from app.errors import conflict, forbidden, not_found
 from app.models import Role, User, user_roles
 from app.permissions import SYSTEM_ROLE_KEYS
@@ -59,6 +59,10 @@ async def create_role(
     existing = await session.scalar(select(Role).where(Role.key == key))
     if existing is not None:
         raise conflict("role_exists", "Роль с таким ключом уже есть")
+
+    # Нельзя создать роль сильнее себя: иначе `roles.create` был бы
+    # второй дорогой к эскалации наряду с правкой существующей роли.
+    ensure_can_grant(user, set(payload.permissions))
 
     role = Role(
         id=new_id(),
@@ -114,6 +118,15 @@ async def update_role(
         raise not_found("role_not_found", "Роль не найдена")
 
     data = payload.model_dump(exclude_unset=True)
+
+    # Проверяем итоговый набор прав, а не только присланный: иначе
+    # можно было бы оставить в роли право, которого у актора нет,
+    # просто не передавая его в теле запроса.
+    resulting = set(role.permissions or [])
+    if "permissions" in data:
+        resulting = set(data["permissions"] or [])
+    ensure_can_grant(user, resulting)
+
     for field, value in data.items():
         setattr(role, field, value)
     await session.flush()

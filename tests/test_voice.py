@@ -228,6 +228,39 @@ async def test_voice_settings_reject_unknown_model(client: AsyncClient, users) -
     assert response.json()["error"]["code"] == "model_invalid"
 
 
+async def test_voice_settings_reject_unknown_language(client: AsyncClient, users) -> None:
+    """Язык проверяется по списку, как модель и режим вычислений.
+
+    Раньше он оставался единственным непроверяемым полем и уходил в
+    файл .env как есть.
+    """
+    response = await client.put(
+        "/api/v1/voice/settings", json={"language": "klingon"}, headers=auth(users, "head")
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "language_invalid"
+
+
+async def test_env_value_cannot_inject_new_variable() -> None:
+    """Перевод строки в значении не должен попасть в .env.
+
+    Значение вида "ru\\nJWT_SECRET=..." превращалось в две строки файла и
+    подменяло секрет подписи токенов, что давало полный доступ.
+    """
+    from app.services.voice_engine import _format_env
+
+    assert "\n" not in _format_env("ru\nJWT_SECRET=hacked")
+    assert "\r" not in _format_env("ru\rJWT_SECRET=hacked")
+    assert "\x00" not in _format_env("ru\x00JWT_SECRET=hacked")
+    # Разделитель не должен оставлять «голое» KEY= без значения.
+    assert "=" not in _format_env("a=b")
+    # Обычные значения не искажаются.
+    assert _format_env("ru") == "ru"
+    assert _format_env("base") == "base"
+    assert _format_env(True) == "true"
+    assert _format_env(False) == "false"
+
+
 async def test_voice_settings_reject_unknown_compute(client: AsyncClient, users) -> None:
     response = await client.put(
         "/api/v1/voice/settings",

@@ -13,6 +13,7 @@ from app.deps import SessionDep, has_perm, require_perm
 from app.models import AuditLog, User
 from app.schemas import OkMessage
 from app.schemas.common import to_utc
+from app.services import audit as audit_service
 from app.services import backup as backup_service
 from app.services import reports as reports_service
 
@@ -120,10 +121,23 @@ async def audit_actions(
     ),
 )
 async def create_backup(
+    session: SessionDep,
     include_files: bool = Query(default=True),
-    _: User = Depends(require_perm("settings.backup")),
+    user: User = Depends(require_perm("settings.backup")),
 ) -> dict:
-    return await backup_service.create_backup(include_files=include_files)
+    # Копии создавались без следа и без ограничения числа: двадцать
+    # запросов забивали диск полными архивами, и в журнале не оставалось
+    # ничего.
+    result = await backup_service.create_backup(include_files=include_files)
+    await audit_service.log_action(
+        session,
+        user=user,
+        action="admin.backup_create",
+        entity_type="backup",
+        entity_id=str(result.get("id") or result.get("backup_id") or ""),
+        details={"include_files": include_files},
+    )
+    return result
 
 
 @router.get("/backups", summary="Список резервных копий")
@@ -136,17 +150,34 @@ async def list_backups(
 @router.post("/backups/{backup_id}/restore", summary="Восстановить из копии")
 async def restore_backup(
     backup_id: str,
-    _: User = Depends(require_perm("settings.backup")),
+    session: SessionDep,
+    user: User = Depends(require_perm("settings.backup")),
 ) -> dict:
-    return await backup_service.restore_backup(backup_id)
+    result = await backup_service.restore_backup(backup_id)
+    await audit_service.log_action(
+        session,
+        user=user,
+        action="admin.backup_restore",
+        entity_type="backup",
+        entity_id=backup_id,
+    )
+    return result
 
 
 @router.delete("/backups/{backup_id}", response_model=OkMessage, summary="Удалить копию")
 async def delete_backup(
     backup_id: str,
-    _: User = Depends(require_perm("settings.backup")),
+    session: SessionDep,
+    user: User = Depends(require_perm("settings.backup")),
 ) -> OkMessage:
     backup_service.delete_backup(backup_id)
+    await audit_service.log_action(
+        session,
+        user=user,
+        action="admin.backup_delete",
+        entity_type="backup",
+        entity_id=backup_id,
+    )
     return OkMessage(detail="Резервная копия удалена")
 
 

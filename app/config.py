@@ -39,6 +39,15 @@ class Settings(BaseSettings):
     password_min_length: int = 8
     max_failed_logins: int = 10
     lockout_minutes: int = 15
+    # Сколько попыток входа допустимо с одного адреса за минуту.
+    # Без этого перебор можно вести по разным логинам неограниченно.
+    login_ip_attempts_per_minute: int = 20
+    # Документация и схема API закрыты по умолчанию: анонимному
+    # посетителю не нужны все пути и требуемые права.
+    expose_api_docs: bool = False
+    # Через запятую: адреса, чьим заголовкам X-Forwarded-For можно верить
+    # при записи в журнал действий. Пусто — не верим никому.
+    trusted_proxies: str = ""
 
     # --- CORS ---
     cors_origins: str = ""

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_session
-from app.errors import forbidden, not_found, unauthorized
+from app.errors import AppError, forbidden, not_found, unauthorized
 from app.models import User
 from app.security import decode_token
 
@@ -46,8 +46,23 @@ async def get_current_user(
     if not user_id:
         raise unauthorized("invalid_token", "Токен недействителен")
     user = await _load_user(session, str(user_id))
+
+    # Временный пароль выдаётся один раз и меняется сотрудником. Флаг
+    # проверялся только в интерфейсе: через API можно было годами работать
+    # с паролем, переданным в открытом чате.
+    if user.must_change_password and not _is_password_change_allowed(request.url.path):
+        raise forbidden(
+            "password_change_required",
+            "Смените временный пароль перед началом работы",
+        )
+
     request.state.user_id = user.id
     return user
+
+
+def _is_password_change_allowed(path: str) -> bool:
+    """Пути, доступные до смены временного пароля."""
+    return path.endswith("/auth/me") or path.endswith("/auth/change-password")
 
 
 def _token_from_request(
@@ -104,6 +119,25 @@ def can_manage(user: User) -> bool:
     return has_perm(user, "tasks.view_all")
 
 
+def ensure_can_grant(user: User, wanted: set[str]) -> None:
+    """Запрещает выдать права, которых нет у самого пользователя.
+
+    Без такой проверки любое право `roles.edit` становилось способом
+    сделать себя администратором: системная роль «Глава отдела» отличается
+    от «Администратора» ровно одним ключом — `settings.manage_roles` — и
+    этот ключ можно было выдать себе самому.
+    """
+    if user.is_superuser:
+        return
+    extra = sorted(wanted - user.permissions)
+    if extra:
+        raise forbidden(
+            "grant_denied",
+            "Нельзя выдать права, которых нет у вас: " + ", ".join(extra),
+            {"missing": extra},
+        )
+
+
 async def user_from_websocket(websocket: WebSocket, session: AsyncSession) -> User:
     """Аутентификация WebSocket: токен приходит в query-строке."""
     token = websocket.query_params.get("token")
@@ -124,7 +158,12 @@ async def get_optional_user(
     """Для эндпоинтов, которые работают и без входа (скачивание по токену)."""
     try:
         token = _token_from_request(request, credentials)
-    except unauthorized.__mro__[0]:
+    except AppError as error:
+        # Раньше здесь стояло `except unauthorized.__mro__[0]`, но
+        # unauthorized — функция, а не класс, поэтому выражение в except
+        # падало с AttributeError вместо тихого выхода.
+        if error.status_code != 401:
+            raise
         return None
     payload = decode_token(token, "access")
     if payload is None:

@@ -57,6 +57,10 @@ def too_large(message: str) -> AppError:
     return AppError(413, "file_too_large", message)
 
 
+def too_many_requests(code: str, message: str, details: Any = None) -> AppError:
+    return AppError(status.HTTP_429_TOO_MANY_REQUESTS, code, message, details)
+
+
 async def app_error_handler(_request: Request, exc: AppError) -> JSONResponse:
     return JSONResponse(status_code=exc.status_code, content=exc.to_body())
 
@@ -94,9 +98,29 @@ async def validation_error_handler(
 
 
 async def unhandled_error_handler(_request: Request, exc: Exception) -> JSONResponse:
+    from sqlalchemy.exc import OperationalError
+
     from app.logging_setup import get_logger
 
-    get_logger("errors").error("unhandled_exception", error=str(exc), exc_info=exc)
+    logger = get_logger("errors")
+
+    # Временная блокировка базы — это не поломка: операция не выполнена,
+    # её можно повторить. Отдаём 503 с честным кодом, а не 500.
+    if isinstance(exc, OperationalError) and any(
+        word in str(exc).lower() for word in ("locked", "busy")
+    ):
+        logger.warning("database_busy", error=str(exc))
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "error": {
+                    "code": "database_busy",
+                    "message": "База данных занята другой операцией. Повторите попытку.",
+                }
+            },
+        )
+
+    logger.error("unhandled_exception", error=str(exc), exc_info=exc)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"error": {"code": "internal_error", "message": "Внутренняя ошибка сервера"}},

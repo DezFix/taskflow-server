@@ -5,12 +5,13 @@ from __future__ import annotations
 import hashlib
 from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import case, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import utcnow
-from app.errors import bad_request, conflict, forbidden, not_found, unauthorized
+from app.errors import AppError, bad_request, conflict, forbidden, not_found, unauthorized
+from app.logging_setup import get_logger
 from app.models import User
 from app.security import (
     create_access_token,
@@ -24,6 +25,8 @@ from app.security import (
 
 MIN_USERNAME_LEN = 3
 MAX_USERNAME_LEN = 64
+
+logger = get_logger("auth")
 
 
 def hash_token(token: str) -> str:
@@ -82,34 +85,32 @@ async def get_user_by_identifier(session: AsyncSession, identifier: str) -> User
 
 
 async def authenticate(session: AsyncSession, identifier: str, password: str) -> User:
-    """Проверяет учётные данные. Блокировка после серии неудач."""
+    """Проверяет учётные данные. Блокировка после серии неудач.
+
+    На любую неудачу возвращается один и тот же код и текст. Раньше
+    отключённая и заблокированная запись отвечали 403 с собственным
+    текстом, а 401 уходил только на несуществующий логин, и по коду ответа
+    можно было перебрать список сотрудников.
+    """
     user = await get_user_by_identifier(session, identifier)
 
     if user is None:
         # Считаем хеш, чтобы время ответа не выдавало наличие логина.
         verify_password(password, hash_password("dummy-for-timing"))
-        raise unauthorized("invalid_credentials", "Неверный логин или пароль")
+        raise _bad_credentials()
 
     if user.is_locked():
-        raise forbidden(
-            "account_locked",
-            f"Вход заблокирован до {user.locked_until:%H:%M}. Обратитесь к администратору",
-        )
+        # Причина известна администратору из журнала, сотруднику — нет.
+        logger.info("login_locked", username=user.username)
+        raise _bad_credentials()
 
     if not user.is_active:
-        raise forbidden("account_disabled", "Учётная запись отключена")
+        logger.info("login_disabled", username=user.username)
+        raise _bad_credentials()
 
     if not verify_password(password, user.password_hash):
-        user.failed_login_count += 1
-        settings = get_settings()
-        if user.failed_login_count >= settings.max_failed_logins:
-            user.locked_until = utcnow() + timedelta(minutes=settings.lockout_minutes)
-            user.failed_login_count = 0
-        # Счётчик неудачных попыток фиксируем отдельным коммитом.
-        # Запрос завершится ошибкой, а зависимость откатит транзакцию —
-        # и без этого коммита блокировка никогда не срабатывала бы.
-        await session.commit()
-        raise unauthorized("invalid_credentials", "Неверный логин или пароль")
+        await _register_failed_attempt(session, user)
+        raise _bad_credentials()
 
     # Успешный вход сбрасывает счётчик неудач.
     user.failed_login_count = 0
@@ -121,6 +122,46 @@ async def authenticate(session: AsyncSession, identifier: str, password: str) ->
 
     await session.flush()
     return user
+
+
+def _bad_credentials() -> AppError:
+    return unauthorized("invalid_credentials", "Неверный логин или пароль")
+
+
+async def _register_failed_attempt(session: AsyncSession, user: User) -> None:
+    """Учитывает неудачную попытку одним UPDATE.
+
+    Раньше счётчик увеличивался в памяти объекта и записывался целиком.
+    Параллельные запросы успевали прочитать одно и то же значение, и
+    инкременты терялись: порог блокировки становился недостижимым, а
+    перебор получал больше попыток, чем настроено.
+    """
+    settings = get_settings()
+    # Порог проверяется в SQL (один UPDATE), поэтому решение для журнала
+    # берём из уже загруженного значения: при гонке оно может
+    # разойтись с базой, но на данные не влияет.
+    will_lock = user.failed_login_count + 1 >= settings.max_failed_logins
+    reached = User.failed_login_count + 1 >= settings.max_failed_logins
+    lock_until = utcnow() + timedelta(minutes=settings.lockout_minutes)
+
+    await session.execute(
+        update(User)
+        .where(User.id == user.id)
+        .values(
+            failed_login_count=case((reached, 0), else_=User.failed_login_count + 1),
+            locked_until=case((reached, lock_until), else_=User.locked_until),
+        )
+    )
+    # Счётчик неудачных попыток фиксируем отдельным коммитом: запрос
+    # завершится ошибкой, и зависимость откатила бы транзакцию вместе с
+    # ней — блокировка не срабатывала бы никогда.
+    await session.commit()
+    if will_lock:
+        logger.warning(
+            "account_locked_out",
+            username=user.username,
+            minutes=settings.lockout_minutes,
+        )
 
 
 def issue_tokens(user: User, session_id: str, refresh_token: str) -> dict:

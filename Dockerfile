@@ -57,11 +57,14 @@ FROM base AS runtime
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
+# Каталог данных вынесен наружу: туда кладутся база, файлы и модели.
+# Пользователь создаётся ДО копирования: иначе `COPY --chown` ссылался бы
+# на ещё не существующего пользователя и права на /app оставались бы root.
+RUN useradd --create-home --uid 10001 taskflow
+
 COPY --chown=taskflow:taskflow . .
 
-# Каталог данных вынесен наружу: туда кладутся база, файлы и модели.
 RUN mkdir -p /app/data/storage /app/data/models /app/data/backups /app/data/web \
-    && useradd --create-home --uid 10001 taskflow \
     && chown -R taskflow:taskflow /app
 
 USER taskflow

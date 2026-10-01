@@ -26,6 +26,7 @@ from app.security import hash_password, new_id
 from app.serializers import user_me
 from app.services import audit as audit_service
 from app.services import auth as auth_service
+from app.services import rate_limit
 from app.services.seed import create_system_roles
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -104,13 +105,37 @@ async def setup(payload: SetupRequest, request: Request, session: SessionDep) ->
 
 @router.post("/login", response_model=TokenPair, summary="Вход по логину или email")
 async def login(payload: LoginRequest, request: Request, session: SessionDep) -> TokenPair:
+    # Ограничение частоты до самой проверки пароля: блокировка учётной
+    # записи защищает от подбора, но не ограничивает скорость попыток.
+    settings = get_settings()
+    rate_limit.check_identifier(
+        payload.identifier,
+        limit=settings.max_failed_logins * 3,
+        window_minutes=settings.lockout_minutes,
+    )
+    ip_address = audit_service.client_ip(request)
+    rate_limit.check_ip(
+        ip_address,
+        limit=settings.login_ip_attempts_per_minute,
+        window_minutes=1,
+    )
     user = await auth_service.authenticate(session, payload.identifier, payload.password)
+    rate_limit.forget(payload.identifier, ip_address)
+    await audit_service.log_action(
+        session,
+        user=user,
+        action="auth.login",
+        entity_type="user",
+        entity_id=user.id,
+        details={"username": user.username},
+        ip_address=ip_address,
+    )
     return await auth_service.create_session(
         session,
         user,
         device_name=payload.device_name,
         user_agent=request.headers.get("user-agent"),
-        ip_address=audit_service.client_ip(request),
+        ip_address=ip_address,
     )
 
 
@@ -121,7 +146,25 @@ async def refresh(payload: RefreshRequest, session: SessionDep) -> TokenPair:
 
 @router.post("/logout", response_model=OkMessage, summary="Выход с устройства")
 async def logout(payload: RefreshRequest, session: SessionDep) -> OkMessage:
+    # Авторизация по access-токену здесь не требуется: клиент отправляет
+    # только refresh-токен, и требование заголовка сломало бы выход.
+    from app.models import RefreshSession
+
+    record = await session.scalar(
+        select(RefreshSession).where(
+            RefreshSession.token_hash == auth_service.hash_token(payload.refresh_token)
+        )
+    )
     await auth_service.revoke_session(session, payload.refresh_token)
+    # Выход с устройства в журнале не оставался: по журналу нельзя было
+    # понять, кто и откуда выходил.
+    await audit_service.log_action(
+        session,
+        user_id=record.user_id if record else None,
+        action="auth.logout",
+        entity_type="user",
+        entity_id=record.user_id if record else "",
+    )
     return OkMessage(detail="Вы вышли из системы")
 
 
@@ -183,6 +226,15 @@ async def change_password(
     await auth_service.change_password(
         session, user, payload.current_password, payload.new_password
     )
+    # Смена пароля в журнале не оставалась: скомпрометированный токен мог
+    # поменять пароль, и следов бы не осталось.
+    await audit_service.log_action(
+        session,
+        user=user,
+        action="auth.password_change",
+        entity_type="user",
+        entity_id=user.id,
+    )
     return OkMessage(detail="Пароль изменён")
 
 
@@ -198,6 +250,14 @@ async def change_password_all(
         session, user, payload.current_password, payload.new_password
     )
     count = await auth_service.revoke_all_sessions(session, user.id)
+    await audit_service.log_action(
+        session,
+        user=user,
+        action="auth.password_change_all",
+        entity_type="user",
+        entity_id=user.id,
+        details={"revoked_sessions": count},
+    )
     return OkMessage(detail=f"Пароль изменён, завершено сессий: {count}")
 
 

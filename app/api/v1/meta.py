@@ -105,7 +105,16 @@ async def permission_matrix(
                 "title": role.title,
                 "is_system": role.is_system,
                 "permissions": [
-                    {"key": key, "title": PERMISSION_TITLES[key], "granted": key in granted}
+                    # Ключ может быть удалён из permissions.py, пока в базе
+                    # ролей он ещё остался: прямой доступ к словарю давал
+                    # 500 на /meta/permission-matrix. get с заглушкой
+                    # показывает такое право отдельной меткой.
+                    {
+                        "key": key,
+                        "title": PERMISSION_TITLES.get(key, "Неизвестное право"),
+                        "unknown": key not in PERMISSION_TITLES,
+                        "granted": key in granted,
+                    }
                     for key in sorted(granted)
                 ],
                 "granted_count": len(granted),

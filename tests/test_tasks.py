@@ -187,6 +187,58 @@ async def test_assign_task(client: AsyncClient, users) -> None:
     assert assigned.json()["assignee"]["id"] == users.ids["staff2"]
 
 
+async def test_staff_cannot_steal_foreign_task_by_assign(client: AsyncClient, users) -> None:
+    """Назначение не должно обходить контроль доступа.
+
+    Право `tasks.assign` есть у рядового сотрудника, а проверки прав на
+    объект в этом эндпоинте не было: GET чужой задачи давал 403, а POST
+    /assign возвращал её полный текст и переводил исполнителя на атакующего.
+    """
+    created = await client.post(
+        "/api/v1/tasks",
+        json={"title": "Чужая задача", "description": "секретный текст"},
+        headers=auth(users, "head"),
+    )
+    task_id = created.json()["id"]
+    await client.post(
+        f"/api/v1/tasks/{task_id}/assign",
+        json={"assignee_id": users.ids["staff2"]},
+        headers=auth(users, "head"),
+    )
+
+    stolen = await client.post(
+        f"/api/v1/tasks/{task_id}/assign",
+        json={"assignee_id": users.ids["staff"]},
+        headers=auth(users, "staff"),
+    )
+    assert stolen.status_code == 403
+    assert "секретный текст" not in stolen.text
+
+    # Задача осталась у прежнего исполнителя.
+    still = await client.get(f"/api/v1/tasks/{task_id}", headers=auth(users, "head"))
+    assert still.json()["assignee"]["id"] == users.ids["staff2"]
+
+
+async def test_staff_cannot_unassign_colleague(client: AsyncClient, users) -> None:
+    """Нельзя и снять задачу с коллеги, сделав её неназначенной."""
+    created = await client.post(
+        "/api/v1/tasks", json={"title": "Задача коллеги"}, headers=auth(users, "head")
+    )
+    task_id = created.json()["id"]
+    await client.post(
+        f"/api/v1/tasks/{task_id}/assign",
+        json={"assignee_id": users.ids["staff2"]},
+        headers=auth(users, "head"),
+    )
+
+    response = await client.post(
+        f"/api/v1/tasks/{task_id}/assign",
+        json={"assignee_id": None},
+        headers=auth(users, "staff"),
+    )
+    assert response.status_code == 403
+
+
 async def test_assign_rejects_inactive_user(client: AsyncClient, users) -> None:
     await client.post(
         f"/api/v1/users/{users.ids['staff2']}/deactivate", headers=auth(users, "head")

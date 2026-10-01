@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import DateTime, MetaData, String, event
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
     AsyncAttrs,
     AsyncEngine,
@@ -115,10 +117,40 @@ async def get_session() -> AsyncIterator[AsyncSession]:
     async with get_sessionmaker()() as session:
         try:
             yield session
-            await session.commit()
+            await commit_with_retry(session)
         except Exception:
             await session.rollback()
             raise
+
+
+#: Сколько раз повторять коммит при временной блокировке SQLite.
+COMMIT_RETRIES = 3
+COMMIT_RETRY_DELAY = 0.2
+
+
+async def commit_with_retry(session: AsyncSession) -> None:
+    """Коммитит с повтором при временной блокировке базы.
+
+    В SQLite пишет только один поток. Обработчик держит транзакцию
+    открытой, пока рассылает события и генерирует превью, поэтому второй
+    запрос на запись получает `database is locked`. Это не ошибка
+    сотрудника, а очередь writers, и повтор её снимает.
+
+    `busy_timeout` не помогает: он не действует, когда снимок чтения
+    прочитан до коммита другого писателя.
+    """
+    for attempt in range(COMMIT_RETRIES):
+        try:
+            await session.commit()
+            return
+        except OperationalError as error:
+            message = str(error).lower()
+            if "locked" not in message and "busy" not in message:
+                raise
+            if attempt == COMMIT_RETRIES - 1:
+                raise
+            await session.rollback()
+            await asyncio.sleep(COMMIT_RETRY_DELAY * (attempt + 1))
 
 
 async def dispose_engine() -> None:

@@ -12,8 +12,10 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+from fastapi import UploadFile
+
 from app.config import get_settings
-from app.errors import bad_request, not_found, too_large
+from app.errors import AppError, bad_request, not_found, too_large
 from app.models import Attachment, AttachmentKind, User
 
 #: Белый список расширений. В офисной сети этого достаточно,
@@ -177,6 +179,31 @@ def _shard(name: str) -> Path:
     return storage_dir() / name[:2] / name[2:4]
 
 
+_CHUNK_SIZE = 1024 * 1024
+
+
+async def read_upload(file: UploadFile) -> bytes:
+    """Читает загрузку, прерываясь на первом же превышении лимита.
+
+    Раньше файл целиком материализовался в памяти и только потом
+    сравнивался с лимитом: отправка тела в гигабайты успевала израсходовать
+    память процесса, хотя ответ должен был быть 413.
+    """
+    limit = get_settings().max_upload_bytes
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(min(_CHUNK_SIZE, limit + 1 - total))
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            await file.close()
+            raise too_large(f"Файл больше {get_settings().max_upload_mb} МБ")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 async def save_upload(
     data: bytes,
     filename: str,
@@ -337,7 +364,11 @@ def preview_path(attachment: Attachment) -> Path | None:
 
 
 def delete_files(attachment: Attachment) -> None:
-    with contextlib.suppress(not_found):
+    # Раньше здесь стояло `contextlib.suppress(not_found)`, но not_found —
+    # функция, возвращающая исключение, а не класс. Передача её в
+    # suppress приводила к TypeError вместо тихого пропуска, и удаление
+    # уже отсутствующего на диске файла отдавало 500.
+    with contextlib.suppress(AppError):
         file_path(attachment).unlink(missing_ok=True)
     preview = preview_path(attachment)
     if preview:

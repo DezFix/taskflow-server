@@ -7,7 +7,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
-from app.deps import SessionDep, require_perm
+from app.deps import SessionDep, ensure_can_grant, has_perm, require_perm
 from app.errors import bad_request, conflict, forbidden, not_found
 from app.models import Role, User
 from app.realtime import EVENT_USER_UPDATED, hub
@@ -193,6 +193,21 @@ async def update_user(
         new_roles = await _resolve_roles(session, data["role_ids"])
         if not new_roles:
             raise bad_request("role_required", "Укажите хотя бы одну роль")
+        # Назначение роли — это выдача её прав. Без проверки любой
+        # сотрудник с `users.edit` мог бы надеть себе роль «Администратор»,
+        # минуя и правило подмножества, и запрет на управление ролями.
+        granted: set[str] = set()
+        for role in new_roles:
+            granted |= role.permission_set
+        ensure_can_grant(actor, granted)
+        # Менять собственные роли разрешено только тому, кто и так
+        # распоряжается ролями: иначе можно было бы снять с себя
+        # ограничение и обойти проверку выше на следующем запросе.
+        if user.id == actor.id and not has_perm(actor, "settings.manage_roles"):
+            raise forbidden(
+                "self_roles_denied",
+                "Изменять собственные роли может только администратор",
+            )
 
     changed: list[str] = []
     for field, value in data.items():
@@ -222,6 +237,9 @@ async def update_user(
     # Клиент сотрудника сразу получает обновление профиля и прав.
     if changed:
         refreshed = await _load_user(session, user.id)
+        # Фиксируем до рассылки: коммит по умолчанию выполняется в
+        # зависимости уже после возврата из обработчика, поэтому событие
+        await session.commit()
         await hub.send_to_user(user.id, EVENT_USER_UPDATED, user_out(refreshed).model_dump())
 
     return user_out(user)

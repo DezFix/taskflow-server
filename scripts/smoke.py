@@ -114,10 +114,11 @@ async def scenario(client: httpx.AsyncClient, base: str) -> None:
     check("Сервер сообщает версию", bool(body.get("version")))
     check("Требуется первоначальная настройка", body.get("requires_setup") is True)
 
-    docs = await client.get("/openapi.json")
-    schema = docs.json()
-    endpoint_count = sum(len(v) for v in schema["paths"].values())
-    check(f"OpenAPI содержит эндпоинты ({endpoint_count})", endpoint_count > 80)
+    # Схема и документация API по умолчанию закрыты: анонимный
+    # посетитель не должен получать карту всех путей и требуемых прав.
+    for path in ("/openapi.json", "/docs", "/redoc"):
+        docs = await client.get(path)
+        check(f"{path} закрыт для анонимных", docs.status_code == 404)
 
     print("\n2. Первоначальная настройка")
     setup = await client.post(
@@ -186,6 +187,33 @@ async def scenario(client: httpx.AsyncClient, base: str) -> None:
             json={"identifier": login, "password": temporary[login]},
         )
         check(f"Вход {login}", response.status_code == 200, response.text)
+        access = response.json()["access_token"]
+        bearer = {"Authorization": f"Bearer {access}"}
+
+        # С временным паролем работать нельзя: сервер требует смены.
+        blocked = await client.get("/api/v1/tasks", headers=bearer)
+        check(
+            f"{login} не может работать с временным паролем",
+            blocked.status_code == 403
+            and blocked.json()["error"]["code"] == "password_change_required",
+            blocked.text,
+        )
+
+        changed = await client.post(
+            "/api/v1/auth/change-password",
+            json={
+                "current_password": temporary[login],
+                "new_password": "PermanentPass123",
+            },
+            headers=bearer,
+        )
+        check(f"{login} сменил временный пароль", changed.status_code == 200, changed.text)
+
+        response = await client.post(
+            "/api/v1/auth/login",
+            json={"identifier": login, "password": "PermanentPass123"},
+        )
+        check(f"Вход {login} с новым паролем", response.status_code == 200, response.text)
         tokens[login] = response.json()["access_token"]
 
     manager = {"Authorization": f"Bearer {tokens['manager']}"}
@@ -369,6 +397,36 @@ async def scenario(client: httpx.AsyncClient, base: str) -> None:
     )
     check("Старый пароль перестал работать", old_login.status_code == 401)
 
+    # После сброса пароль снова временный: пока сотрудник его не сменил,
+    # работать нельзя. Обновляем пароль, чтобы сценарий шёл дальше.
+    fresh_login = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "identifier": "engineer2",
+            "password": reset.json()["temporary_password"],
+        },
+    )
+    check(
+        "Вход с новым временным паролем",
+        fresh_login.status_code == 200,
+        fresh_login.text,
+    )
+    fresh_headers = {"Authorization": f"Bearer {fresh_login.json()['access_token']}"}
+    fresh_changed = await client.post(
+        "/api/v1/auth/change-password",
+        json={
+            "current_password": reset.json()["temporary_password"],
+            "new_password": "PermanentPass123",
+        },
+        headers=fresh_headers,
+    )
+    check("Смена пароля после сброса", fresh_changed.status_code == 200, fresh_changed.text)
+    fresh_login = await client.post(
+        "/api/v1/auth/login",
+        json={"identifier": "engineer2", "password": "PermanentPass123"},
+    )
+    tokens["engineer2"] = fresh_login.json()["access_token"]
+
     blocked_user = await client.post(
         f"/api/v1/users/{created_users['engineer']}/deactivate", headers=manager
     )
@@ -377,7 +435,13 @@ async def scenario(client: httpx.AsyncClient, base: str) -> None:
         "/api/v1/auth/login",
         json={"identifier": "engineer", "password": temporary["engineer"]},
     )
-    check("Деактивированный не входит", blocked_login.status_code == 403)
+    check(
+        "Деактивированный не входит",
+        # Ответ намеренно такой же, как при неверном пароле: иначе по
+        # коду можно перебрать логины сотрудников.
+        blocked_login.status_code == 401
+        and blocked_login.json()["error"]["code"] == "invalid_credentials",
+    )
 
     print("\n10. Реалтайм (WebSocket)")
     await websocket_check(

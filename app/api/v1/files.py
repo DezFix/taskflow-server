@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.deps import CurrentUser, SessionDep, has_perm, require_perm
-from app.errors import forbidden, not_found, too_large
+from app.errors import forbidden, not_found
 from app.models import Attachment, Message, User
 from app.schemas import FileOut, OkMessage
 from app.services import audit as audit_service
@@ -18,9 +18,15 @@ from app.services import files as files_service
 
 router = APIRouter(prefix="/files", tags=["files"])
 
-#: Отдаём файлы с подтверждением кэширования: содержимое неизменяемо.
+#: Приватные файлы не кэшируем.
+#:
+#: Раньше здесь стояло `private, max-age=86400`, что перекрывало общий
+#: no-store для API: содержимое оставалось в дисковом кэше браузера на
+#: сутки, а адрес вложения — это только идентификатор без привязки к
+#: пользователю. На общем компьютере следующий сотрудник того же профиля
+#: мог получить файл из кэша без проверки прав.
 DOWNLOAD_HEADERS = {
-    "Cache-Control": "private, max-age=86400",
+    "Cache-Control": "private, no-store, max-age=0",
     "X-Content-Type-Options": "nosniff",
 }
 
@@ -51,13 +57,9 @@ async def upload_file(
     ] = None,
     user: User = Depends(require_perm("files.upload")),
 ) -> FileOut:
-    settings = get_settings()
-
-    data = await file.read()
-    if len(data) > settings.max_upload_bytes:
-        # Досчитываем остаток, чтобы соединение закрылось корректно.
-        await file.close()
-        raise too_large(f"Файл больше {settings.max_upload_mb} МБ")
+    # Читаем с ограничением по ходу: лимит проверяется до того, как тело
+    # запроса целиком окажется в памяти.
+    data = await files_service.read_upload(file)
 
     attachment = await files_service.save_upload(
         data,
@@ -223,9 +225,10 @@ async def delete_file(
         select(Message.id).where(Message.attachment_id == file_id).limit(1)
     )
     attachment.is_deleted = True
-    if not used_in_message:
-        files_service.delete_files(attachment)
-    await session.flush()
+    # Пока не стираем. Коммит здесь ещё не прошёл, и при откате файл
+    # остался бы удалённым с диска, а в базе — живым: фотоотчёт пропадал бы
+    # безвозвратно, и ссылка на него вела в file_missing.
+    pending_unlink = None if used_in_message else attachment
 
     await audit_service.log_action(
         session,
@@ -234,6 +237,11 @@ async def delete_file(
         entity_type="attachment",
         entity_id=file_id,
     )
+    # Сначала фиксируем признак удаления, потом убираем файл с диска.
+    await session.commit()
+
+    if pending_unlink is not None:
+        files_service.delete_files(pending_unlink)
     return OkMessage(detail="Файл удалён")
 
 

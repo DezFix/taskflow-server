@@ -178,6 +178,9 @@ async def create_task(
     result = task_out(task)
 
     recipients = _task_recipients(task, user)
+    # Фиксируем до рассылки: коммит по умолчанию выполняется в
+    # зависимости уже после возврата из обработчика, поэтому событие
+    await session.commit()
     await hub.send_to_users(recipients, EVENT_TASK_CREATED, result.model_dump())
 
     await audit_service.log_action(
@@ -249,6 +252,9 @@ async def update_task(
     changes = await task_service.update_task(session, task, user, payload)
     if changes:
         for recipient in _task_recipients(task, user):
+            # Фиксируем до рассылки: коммит по умолчанию выполняется в
+            # зависимости уже после возврата из обработчика, поэтому событие
+            await session.commit()
             await hub.send_to_user(
                 recipient,
                 EVENT_TASK_UPDATED,
@@ -287,6 +293,10 @@ async def change_status(
     )
     await task_service.change_status(session, task, user, payload.status, payload.comment)
 
+    # Фиксируем до рассылки: коммит по умолчанию выполняется в
+    # зависимости уже после возврата из обработчика, поэтому событие
+    # уходило клиентам раньше, чем данные оказывались в базе.
+    await session.commit()
     for recipient in _task_recipients(task, user):
         await hub.send_to_user(
             recipient,
@@ -309,6 +319,17 @@ async def assign_task(
     user: User = Depends(require_perm("tasks.assign")),
 ) -> TaskOut:
     task = await task_service.load_task(session, task_id)
+    # Проверки видимости и права правки здесь обязательны. Раньше их не
+    # было, и право `tasks.assign`, которое есть у обычного сотрудника,
+    # позволяло переназначить чужую задачу себе и получить её полный
+    # текст в ответе — в обход контроля доступа, который на GET работает.
+    task_service.ensure_can_view(task, user, has_perm(user, "tasks.view_all"))
+    task_service.ensure_can_edit(
+        task,
+        user,
+        has_perm(user, "tasks.edit_any"),
+        has_perm(user, "tasks.edit_assigned"),
+    )
     await task_service.assign_task(session, task, user, payload.assignee_id, payload.due_at)
 
     if payload.comment and payload.comment.strip():
@@ -323,6 +344,10 @@ async def assign_task(
         task.comments_count += 1
         await session.flush()
 
+    # Фиксируем до рассылки: коммит по умолчанию выполняется в
+    # зависимости уже после возврата из обработчика, поэтому событие
+    # уходило клиентам раньше, чем данные оказывались в базе.
+    await session.commit()
     for recipient in _task_recipients(task, user):
         await hub.send_to_user(
             recipient,
@@ -400,6 +425,9 @@ async def add_comment(
         payload.is_work_report,
     )
 
+    # Фиксируем до рассылки: коммит по умолчанию выполняется в
+    # зависимости уже после возврата из обработчика, поэтому событие
+    await session.commit()
     await hub.send_to_users(
         _task_recipients(task, user),
         EVENT_TASK_UPDATED,
@@ -457,6 +485,9 @@ async def delete_task(
     task.is_archived = True
     await session.flush()
 
+    # Фиксируем до рассылки: коммит по умолчанию выполняется в
+    # зависимости уже после возврата из обработчика, поэтому событие
+    await session.commit()
     await hub.send_to_users(
         _task_recipients(task, user),
         EVENT_TASK_DELETED,
@@ -501,7 +532,13 @@ async def user_load(
     user: User = Depends(require_perm("tasks.reports")),
 ) -> UserLoadOut:
     data = await reports_service.user_load(
-        session, has_perm(user, "tasks.view_all"), period_from=period_from, period_to=period_to
+        session,
+        has_perm(user, "tasks.view_all"),
+        # Без права видеть весь отдел сотрудник получает только свою
+        # строку, а не сводку по коллегам.
+        only_user_id=user.id,
+        period_from=period_from,
+        period_to=period_to,
     )
     from app.serializers import user_brief
 

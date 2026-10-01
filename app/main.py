@@ -73,13 +73,20 @@ WebSocket `ws(s)://<host>/api/v1/ws?token=<access_token>`.
 `x-required-permissions` в OpenAPI.
 """
 
+#: Документация и схема API по умолчанию закрыты.
+#:
+#: Анонимный посетитель получал полную карту: все пути, все имена полей и
+#: требуемое право на каждом эндпоинте. Для планирования атаки этого
+#: достаточно, а включать схему можно администратору осознанно.
+EXPOSE_API_DOCS = get_settings().expose_api_docs
+
 app = FastAPI(
     title="TaskFlow Server",
     description=DESCRIPTION,
     version=API_VERSION,
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
+    docs_url="/docs" if EXPOSE_API_DOCS else None,
+    redoc_url="/redoc" if EXPOSE_API_DOCS else None,
+    openapi_url="/openapi.json" if EXPOSE_API_DOCS else None,
     license_info={"name": "MIT"},
     responses={
         400: {"model": ErrorResponse, "description": "Ошибка запроса"},

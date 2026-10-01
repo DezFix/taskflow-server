@@ -76,16 +76,22 @@ async def user_load(
     session: AsyncSession,
     can_see_all: bool,
     *,
+    only_user_id: str | None = None,
     period_from: datetime | None = None,
     period_to: datetime | None = None,
 ) -> dict:
-    """Нагрузка по сотрудникам: сколько задач и в каком состоянии."""
+    """Нагрузка по сотрудникам: сколько задач и в каком состоянии.
+
+    Без `tasks.view_all` сотрудник видит только себя. Раньше право
+    `tasks.reports` (оно есть у рядового сотрудника) открывало сводку по
+    всему отделу: сколько задач у каждого коллеги, сколько просрочено.
+    """
+    query = select(User).where(User.is_active.is_(True))
+    if not can_see_all and only_user_id:
+        query = query.where(User.id == only_user_id)
     users = (
         await session.scalars(
-            select(User)
-            .where(User.is_active.is_(True))
-            .options(selectinload(User.roles))
-            .order_by(User.full_name)
+            query.options(selectinload(User.roles)).order_by(User.full_name)
         )
     ).all()
 
@@ -149,6 +155,24 @@ async def user_load(
     return {"rows": rows, "period_from": period_from, "period_to": period_to}
 
 
+#: Символы, с которых Excel и LibreOffice начинают считать ячейку формулой.
+_FORMULA_STARTERS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def csv_safe(value: object) -> str:
+    """Готовит значение к выгрузке так, чтобы оно не стало формулой.
+
+    Заголовок задачи пишет сотрудник, а выгрузку открывает руководитель:
+    без экранирования значение вида =WEBSERVICE(...) или =cmd|'/C calc'!A1
+    исполнилось бы в его Excel от его имени. Апостроф в начале заставляет
+    таблицу считать ячейку текстом.
+    """
+    text = "" if value is None else str(value)
+    if text.startswith(_FORMULA_STARTERS):
+        return "'" + text
+    return text
+
+
 async def export_csv(
     session: AsyncSession,
     can_see_all: bool,
@@ -204,19 +228,21 @@ async def export_csv(
         ]
     )
     for task in tasks:
+        # Пользовательский текст проходит через csv_safe: заголовок, имена
+        # и метки пишут сотрудники, а файл открывает руководитель.
         writer.writerow(
             [
                 task.id,
-                task.title,
-                TaskStatus(task.status).title,
-                TaskPriority(task.priority).title,
-                task.assignee.full_name if task.assignee else "",
-                task.author.full_name if task.author else "",
+                csv_safe(task.title),
+                csv_safe(TaskStatus(task.status).title),
+                csv_safe(TaskPriority(task.priority).title),
+                csv_safe(task.assignee.full_name if task.assignee else ""),
+                csv_safe(task.author.full_name if task.author else ""),
                 task.due_at.strftime("%Y-%m-%d %H:%M") if task.due_at else "",
                 task.created_at.strftime("%Y-%m-%d %H:%M") if task.created_at else "",
                 task.completed_at.strftime("%Y-%m-%d %H:%M") if task.completed_at else "",
                 "да" if task.is_overdue else "нет",
-                ", ".join(tag.name for tag in task.tags),
+                csv_safe(", ".join(tag.name for tag in task.tags)),
                 task.estimated_hours or "",
             ]
         )

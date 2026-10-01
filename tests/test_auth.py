@@ -169,15 +169,18 @@ async def test_account_locks_after_repeated_failures(
         "/api/v1/auth/login",
         json={"identifier": "staff2", "password": "StaffPass123"},
     )
-    assert blocked.status_code == 403
-    assert blocked.json()["error"]["code"] == "account_locked"
+    assert blocked.status_code == 401
+    # Тот же ответ, что при неверном пароле: иначе по коду определяется
+    # факт существования учётной записи.
+    assert blocked.json()["error"]["code"] == "invalid_credentials"
 
     # Верный пароль не помогает, пока не истекла блокировка.
     again = await client.post(
         "/api/v1/auth/login",
         json={"identifier": "staff2", "password": "StaffPass123"},
     )
-    assert again.status_code == 403
+    assert again.status_code == 401
+    assert again.json()["error"]["code"] == "invalid_credentials"
 
 
 async def test_successful_login_resets_failure_counter(
@@ -353,8 +356,61 @@ async def test_deactivated_user_cannot_login(client: AsyncClient, users) -> None
     login = await client.post(
         "/api/v1/auth/login", json={"identifier": "staff2", "password": STAFF_PASSWORD}
     )
-    assert login.status_code == 403
-    assert login.json()["error"]["code"] == "account_disabled"
+    # Ответ намеренно такой же, как при неверном пароле: иначе по коду
+    # можно перебрать логины сотрудников.
+    assert login.status_code == 401
+    assert login.json()["error"]["code"] == "invalid_credentials"
+
+
+async def test_login_failure_responses_are_indistinguishable(
+    client: AsyncClient, users
+) -> None:
+    """По ответу нельзя определить, существует ли учётная запись.
+
+    Раньше несуществующий логин давал 401, отключённый — 403 с текстом
+    «Учётная запись отключена», заблокированный — 403 со временем
+    разблокировки. Эти различия выдавали список сотрудников.
+    """
+    await client.post(
+        f"/api/v1/users/{users.ids['staff2']}/deactivate",
+        headers=users_auth(users, "head"),
+    )
+
+    unknown = await client.post(
+        "/api/v1/auth/login", json={"identifier": "nobody-here", "password": "whatever-1"}
+    )
+    disabled = await client.post(
+        "/api/v1/auth/login", json={"identifier": "staff2", "password": STAFF_PASSWORD}
+    )
+    wrong = await client.post(
+        "/api/v1/auth/login", json={"identifier": "staff", "password": "wrong-password"}
+    )
+
+    codes = {r.status_code for r in (unknown, disabled, wrong)}
+    assert codes == {401}
+    assert len({r.json()["error"]["code"] for r in (unknown, disabled, wrong)}) == 1
+    assert len({r.json()["error"]["message"] for r in (unknown, disabled, wrong)}) == 1
+
+
+async def test_login_is_rate_limited(client: AsyncClient, users, monkeypatch) -> None:
+    """Частота попыток ограничена: иначе перебор можно вести без пауз."""
+    from app.config import get_settings
+    from app.services import rate_limit
+
+    # Порог снижаем, чтобы тест не делал десятки проверок Argon2.
+    monkeypatch.setattr(get_settings(), "max_failed_logins", 2, raising=False)
+    rate_limit.reset()
+    try:
+        payload = {"identifier": "nobody-here", "password": "guess-password"}
+        statuses = [
+            (await client.post("/api/v1/auth/login", json=payload)).status_code
+            for _ in range(8)
+        ]
+        assert 429 in statuses
+        # До срабатывания лимита запрос доходит до проверки пароля.
+        assert set(statuses[:2]) == {401}
+    finally:
+        rate_limit.reset()
 
 
 def auth(users, role: str) -> dict[str, str]:  # noqa: ANN001

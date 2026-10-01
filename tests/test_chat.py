@@ -202,6 +202,60 @@ async def test_group_owner_cannot_be_removed(client: AsyncClient, users) -> None
     assert response.json()["error"]["code"] == "cannot_remove_owner"
 
 
+async def test_removed_group_member_cannot_edit_or_delete(client: AsyncClient, users) -> None:
+    """Ушедший с группы сотрудник теряет доступ к её сообщениям.
+
+    Проверки членства в этих двух эндпоинтах не было: ушедший участник
+    мог править свои сообщения, а бывший администратор группы — удалять
+    чужие, потому что запись админа искалась без учёта left_at.
+    """
+    created = await client.post(
+        "/api/v1/chats/groups",
+        json={
+            "title": "Группа для проверки",
+            "member_ids": [users.ids["staff"], users.ids["staff2"]],
+        },
+        headers=auth(users, "head"),
+    )
+    chat_id = created.json()["id"]
+    mine = await client.post(
+        f"/api/v1/chats/{chat_id}/messages",
+        json={"body": "Сообщение участника"},
+        headers=auth(users, "staff"),
+    )
+    theirs = await client.post(
+        f"/api/v1/chats/{chat_id}/messages",
+        json={"body": "Сообщение руководителя"},
+        headers=auth(users, "head"),
+    )
+
+    removed = await client.patch(
+        f"/api/v1/chats/{chat_id}",
+        json={"remove_member_ids": [users.ids["staff"]]},
+        headers=auth(users, "head"),
+    )
+    assert removed.status_code == 200
+
+    edited = await client.patch(
+        f"/api/v1/chats/messages/{mine.json()['id']}",
+        json={"body": "Правка после ухода"},
+        headers=auth(users, "staff"),
+    )
+    assert edited.status_code == 403
+
+    deleted = await client.delete(
+        f"/api/v1/chats/messages/{theirs.json()['id']}",
+        headers=auth(users, "staff"),
+    )
+    assert deleted.status_code == 403
+
+    # Сообщение на месте.
+    still = await client.get(
+        f"/api/v1/chats/{chat_id}/messages", headers=auth(users, "head")
+    )
+    assert any(m["body"] == "Сообщение руководителя" for m in still.json()["items"])
+
+
 async def test_direct_chat_is_immutable(client: AsyncClient, users) -> None:
     chat_id = await _open_direct(client, users, "staff", "staff2")
     response = await client.patch(

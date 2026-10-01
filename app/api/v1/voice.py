@@ -17,7 +17,7 @@ from app.schemas import (
 )
 from app.services import chat as chat_service
 from app.services import voice_engine, voice_jobs
-from app.services.voice_engine import AVAILABLE_MODELS, COMPUTE_TYPES
+from app.services.voice_engine import AVAILABLE_LANGUAGES, AVAILABLE_MODELS, COMPUTE_TYPES
 
 router = APIRouter(prefix="/voice", tags=["voice"])
 
@@ -67,6 +67,14 @@ async def update_voice_settings(
         raise bad_request(
             "compute_type_invalid",
             f"Режим вычислений должен быть одним из: {', '.join(COMPUTE_TYPES)}",
+        )
+    if payload.language and payload.language not in AVAILABLE_LANGUAGES:
+        # Раньше язык оставался единственным из четырёх полей без проверки:
+        # модель и режим вычислений сверялись со списком, а язык уходил в
+        # файл .env как есть.
+        raise bad_request(
+            "language_invalid",
+            f"Язык должен быть одним из: {', '.join(AVAILABLE_LANGUAGES)}",
         )
 
     voice_engine.engine.update_settings(

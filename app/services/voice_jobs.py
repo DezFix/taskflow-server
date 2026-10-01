@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import get_settings
 from app.database import utcnow
+from app.errors import too_many_requests
 from app.logging_setup import get_logger
 from app.models import Attachment, Message, Transcript, TranscriptStatus, User
 from app.realtime import EVENT_TRANSCRIPT_READY, hub
@@ -30,6 +31,9 @@ COOLDOWN_SECONDS = 0.5
 #: транзакция запроса, создавшего голосовое сообщение.
 TRANSCRIPT_WAIT_ATTEMPTS = 10
 TRANSCRIPT_WAIT_SECONDS = 0.3
+
+#: Сколько записей может ждать распознавания одновременно.
+MAX_QUEUE_SIZE = 50
 
 
 class VoiceQueue:
@@ -71,6 +75,15 @@ class VoiceQueue:
         """
         if message_id in self._priority:
             return
+        if self._queue.qsize() + len(self._priority) >= MAX_QUEUE_SIZE:
+            # Очередь не ограничена была ничем: один сотрудник мог забить
+            # её десятками файлов по 25 МБ, и распознавание вставало на
+            # сутки у всех. Воркер один, поэтому переполнение — это отказ.
+            raise too_many_requests(
+                "voice_queue_full",
+                f"Очередь распознавания переполнена ({MAX_QUEUE_SIZE} записей). "
+                "Попробуйте позже.",
+            )
         if priority:
             self._priority.append(message_id)
             return

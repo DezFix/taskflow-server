@@ -7,7 +7,7 @@ import binascii
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Select, and_, func, or_, select
+from sqlalchemy import Select, and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -78,6 +78,31 @@ async def next_task_seq(session: AsyncSession) -> int:
     """
     current = await session.scalar(select(func.max(Task.seq)))
     return (current or 0) + 1
+
+
+async def bump_counters(
+    session: AsyncSession,
+    task: Task,
+    *,
+    comments: int = 0,
+    attachments: int = 0,
+) -> None:
+    """Увеличивает счётчики задачи одним UPDATE.
+
+    Раньше счётчик читали в объекте и записывали целиком. Два
+    одновременных комментария оба прочитали одно значение, оба записали
+    «плюс один», и счётчик навсегда расходился с числом строк в
+    task_comments. Счётчик показывается в списке задач, а реальный
+    список комментариев — в карточке, и данные противоречили друг другу.
+    """
+    if not comments and not attachments:
+        return
+    values: dict[str, int] = {}
+    if comments:
+        values["comments_count"] = Task.comments_count + comments
+    if attachments:
+        values["attachments_count"] = Task.attachments_count + attachments
+    await session.execute(update(Task).where(Task.id == task.id).values(**values))
 
 
 async def get_tags(session: AsyncSession, names: list[str]) -> list[TaskTag]:
@@ -340,7 +365,7 @@ async def change_status(
         )
         note.author = user
         session.add(note)
-        task.comments_count += 1
+        await bump_counters(session, task, comments=1)
         await session.flush()
 
 
@@ -387,8 +412,7 @@ async def add_comment(
     )
     comment.author = user
     session.add(comment)
-    task.comments_count += 1
-    task.attachments_count += len(attachment_ids)
+    await bump_counters(session, task, comments=1, attachments=len(attachment_ids))
     await session.flush()
 
     # Отчёт о выполнении переводит задачу в «на проверке» — это ожидаемое
