@@ -175,3 +175,31 @@ async def test_unknown_permission_rejected(client: AsyncClient, users) -> None:
 async def test_superuser_sees_all_permissions(client: AsyncClient, users) -> None:
     me = await client.get("/api/v1/auth/me", headers=auth(users, "admin"))
     assert set(me.json()["permissions"]) == set(PERMISSION_KEYS)
+
+
+async def test_system_roles_expose_language_neutral_id(
+    client: AsyncClient, users
+) -> None:
+    """У системных ролей есть английский идентификатор для перевода.
+
+    Ключ роли в базе русский, и менять его нельзя: он участвует в
+    проверках прав. Интерфейсу нужен независимый от языка идентификатор.
+    """
+    from app.permissions import SYSTEM_ROLE_IDS, system_role_id
+
+    response = await client.get("/api/v1/roles", headers=auth(users, "head"))
+    assert response.status_code == 200
+
+    by_id = {role["i18n_key"]: role for role in response.json() if role["i18n_key"]}
+    assert set(by_id) == set(SYSTEM_ROLE_IDS)
+    for identifier, role_key in SYSTEM_ROLE_IDS.items():
+        assert by_id[identifier]["key"] == role_key
+        assert system_role_id(role_key) == identifier
+
+
+async def test_custom_role_has_no_i18n_id(client: AsyncClient, users) -> None:
+    """Своя роль не переводится: её назвал администратор."""
+    response = await client.get("/api/v1/roles", headers=auth(users, "head"))
+    custom = [role for role in response.json() if not role["is_system"]]
+    for role in custom:
+        assert role["i18n_key"] is None

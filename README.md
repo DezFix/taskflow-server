@@ -277,6 +277,21 @@ Worth doing before public internet access:
 - Configure `CORS_ORIGINS` if the web client lives on another domain
 - Restrict access to the port with a firewall or VPN
 
+## Languages
+
+The API speaks language-neutral error codes (`task_access_denied`), and the
+client renders them in the language of the interface. Server-side text stays in
+Russian for logs and API debugging, so responses are not duplicated per locale.
+
+Names that live in the database need care. System roles keep a Russian `key`
+because it is stored and used in permission checks, and changing it would break
+existing installations. The API therefore adds `i18n_key` to role responses:
+`'admin'`, `'head'` or `'staff'`, independent of the storage language. Custom
+roles return `null` and their titles are shown as entered.
+
+`Accept-Language` is not used: adding a language to the server would multiply
+every message in the API, while the codes stay the same for every locale.
+
 ## Licence
 
 MIT. See [LICENSE](LICENSE).

@@ -92,6 +92,10 @@ class RoleOut(Schema):
     id: str
     key: str
     title: str
+    # Машиночитаемый идентификатор системной роли: 'admin', 'head'
+    # или 'staff'. Ключ в базе русский, а клиент переводит название
+    # по этому полю, поэтому язык хранилища не влияет на интерфейс.
+    i18n_key: str | None = None
     description: str | None = None
     permissions: list[str] = []
     is_system: bool = False

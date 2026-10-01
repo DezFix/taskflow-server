@@ -173,12 +173,14 @@ def position_out(position: Position, users_count: int = 0) -> PositionOut:  # no
 
 
 def role_out(role: Role, users_count: int = 0) -> RoleOut:  # noqa: F821
+    from app.permissions import system_role_id
     from app.schemas.user import RoleOut
 
     return RoleOut(
         id=role.id,
         key=role.key,
         title=role.title,
+        i18n_key=system_role_id(role.key),
         description=role.description,
         permissions=list(role.permissions or []),
         is_system=role.is_system,
