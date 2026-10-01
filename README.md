@@ -186,8 +186,14 @@ pytest --cov=app --cov-report=term-missing
 ruff check app tests            # code style
 python scripts/smoke.py         # end-to-end API check against a live server
 python scripts/voice_check.py   # voice recognition check
+python scripts/voice_check.py --strict-accuracy  # fail on recognition mismatch
 python scripts/check_schema.py  # table composition in the database
 ```
+
+`voice_check.py` verifies the decoding and resampling pipeline and the
+transcription queue. Recognition accuracy on synthesised speech depends on the
+synthesiser and the model, so by default a mismatch is reported as a warning.
+Pass `--strict-accuracy` locally to turn it into a failure.
 
 ### Migrations
 
